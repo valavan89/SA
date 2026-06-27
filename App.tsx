@@ -3402,7 +3402,7 @@ const App: React.FC = () => {
               <Settings size={18} />
             </div>
             <div className="min-w-0">
-              <span className="block text-xs font-black uppercase tracking-wide">1. Profile & Period</span>
+              <span className="block text-xs font-black uppercase tracking-wide">1. Profile Settings</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
                 {metadata.name || 'Setup profile'}
               </span>
@@ -3607,9 +3607,9 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm" id="profile-section">
-               <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2" id="profile-heading"><User size={14}/> Professional Profile</h3>
+               <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-4 flex items-center gap-2" id="profile-heading"><User size={14}/> Professional Profile</label>
                <div className="space-y-3">
                   <input type="text" id="profile-name-input" placeholder="Full Name" value={metadata.name} onChange={e => setMetadata({...metadata, name: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
                   <input type="text" id="profile-office-input" placeholder="Sub Division / HO (e.g. Chidambaram HO)" value={metadata.office} onChange={e => setMetadata({...metadata, office: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
@@ -3653,19 +3653,8 @@ const App: React.FC = () => {
                   </div>
                </div>
             </section>
-            <section className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm animate-fade-in" id="fortnight-section">
-               <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2"><Calendar size={14}/> Reporting Fortnight</h3>
-               <div className="flex bg-slate-100 p-1 rounded-xl mb-3">
-                  <button onClick={() => { setMetadata({...metadata, fortnight: 'first'}); setSelectedDateIdx(0); }} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all ${metadata.fortnight === 'first' ? 'bg-white shadow-md text-blue-600' : 'text-slate-500'}`}>1 - 15</button>
-                  <button onClick={() => { setMetadata({...metadata, fortnight: 'second'}); setSelectedDateIdx(0); }} className={`flex-1 py-2.5 rounded-lg text-xs font-black transition-all ${metadata.fortnight === 'second' ? 'bg-white shadow-md text-blue-600' : 'text-slate-500'}`}>16 - End</button>
-               </div>
-               <div className="grid grid-cols-2 gap-3">
-                  <select value={metadata.month} onChange={e => { setMetadata({...metadata, month: parseInt(e.target.value)}); setSelectedDateIdx(0); }} className="p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none">{Array.from({length: 12}).map((_, i) => <option key={i} value={i}>{new Date(0, i).toLocaleString('default', { month: 'long' })}</option>)}</select>
-                  <input type="number" value={metadata.year} onChange={e => { setMetadata({...metadata, year: parseInt(e.target.value)}); setSelectedDateIdx(0); }} className="p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none animate-fade-in" />
-               </div>
-            </section>
             <section className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm animate-fade-in" id="submission-section">
-               <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2"><MapPin size={14}/> Submission Info</h3>
+               <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-4 flex items-center gap-2"><MapPin size={14}/> Submission Info</label>
                <div className="space-y-3">
                   <input type="text" placeholder="Place" value={metadata.submissionPlace} onChange={e => setMetadata({...metadata, submissionPlace: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
                   <input type="text" placeholder="Date" value={metadata.submissionDate} onChange={e => setMetadata({...metadata, submissionDate: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
@@ -3792,8 +3781,57 @@ const App: React.FC = () => {
             
             <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="space-y-6 lg:col-span-5">
+                <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-3xl space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-blue-600 block flex items-center gap-1.5">
+                    <Calendar size={12} /> 1. Reporting Fortnight
+                  </label>
+                  <div className="flex bg-slate-200/60 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => { setMetadata({...metadata, fortnight: 'first'}); setSelectedDateIdx(0); }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all border-0 cursor-pointer ${
+                        metadata.fortnight === 'first' 
+                          ? 'bg-white shadow-sm text-blue-600 font-black' 
+                          : 'text-slate-500 hover:text-slate-700 bg-transparent'
+                      }`}
+                    >
+                      1 - 15
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMetadata({...metadata, fortnight: 'second'}); setSelectedDateIdx(0); }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-black transition-all border-0 cursor-pointer ${
+                        metadata.fortnight === 'second' 
+                          ? 'bg-white shadow-sm text-blue-600 font-black' 
+                          : 'text-slate-500 hover:text-slate-700 bg-transparent'
+                      }`}
+                    >
+                      16 - End
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={metadata.month}
+                      onChange={e => { setMetadata({...metadata, month: parseInt(e.target.value)}); setSelectedDateIdx(0); }}
+                      className="p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer"
+                    >
+                      {Array.from({length: 12}).map((_, i) => (
+                        <option key={i} value={i}>
+                          {new Date(0, i).toLocaleString('default', { month: 'long' })}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={metadata.year}
+                      onChange={e => { setMetadata({...metadata, year: parseInt(e.target.value)}); setSelectedDateIdx(0); }}
+                      className="p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none text-center"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">1. Select Date</label>
+                  <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">2. Select Date</label>
                   <div className="relative mb-4">
                     <select 
                       value={selectedDateIdx}
@@ -3833,8 +3871,8 @@ const App: React.FC = () => {
                   </div>
 
                   {/* Leave options below Select Date */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Duty / Leave Status</label>
+                  <div className="space-y-2 text-left">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Duty / Leave Status</label>
                     <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
                       {[
                         { value: '', label: 'On Duty' },
@@ -3932,7 +3970,7 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">2. Primary Transport</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">3. Primary Transport</label>
                     <div className="flex gap-1.5 bg-slate-100 p-1 rounded-2xl">
                       {['Bus', 'Bike', 'Train', 'Auto'].map((m) => (
                         <button 
@@ -3965,9 +4003,9 @@ const App: React.FC = () => {
                 )}
               </div>
 
-              <div className="space-y-6 lg:col-span-7 flex flex-col justify-between">
+              <div className="space-y-6 lg:col-span-7 flex flex-col justify-between text-left">
                  <div>
-                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 block">3. Sequential Visits</label>
+                   <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">4. Sequential Visits</label>
                    {(() => {
                      const activeDay = availableDays[selectedDateIdx];
                      if (!activeDay) return null;
@@ -4028,7 +4066,7 @@ const App: React.FC = () => {
                         <div className="absolute -left-2 top-4 w-6 h-6 bg-blue-600 text-white text-[10px] font-black flex items-center justify-center rounded-full shadow-lg">{i+1}</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                           <div className="relative space-y-1 text-left office-select-container">
-                            <label className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Office Visited</label>
+                            <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-1.5">Office Visited</label>
                             <div className="relative">
                               <input 
                                 type="text" 
@@ -4088,7 +4126,7 @@ const App: React.FC = () => {
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <div className="space-y-1 text-left">
-                              <label className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Time In</label>
+                              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-1.5">Time In</label>
                               <input 
                                 type="time" 
                                 value={v.startTime} 
@@ -4108,7 +4146,7 @@ const App: React.FC = () => {
                               />
                             </div>
                             <div className="space-y-1 text-left">
-                              <label className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Time Out</label>
+                              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-1.5">Time Out</label>
                               <input 
                                 type="time" 
                                 value={v.endTime} 
@@ -4629,7 +4667,7 @@ const App: React.FC = () => {
                 {/* Row 1: Direct Office Route Metrics */}
                 <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">From Office</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">From Office</label>
                     <input
                       type="text"
                       list="db-from-office-options"
@@ -4643,7 +4681,7 @@ const App: React.FC = () => {
                     </datalist>
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">To Office</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">To Office</label>
                     <input
                       type="text"
                       list="db-to-office-options"
@@ -4657,7 +4695,7 @@ const App: React.FC = () => {
                     </datalist>
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bus Distance (KM)</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bus Distance (KM)</label>
                     <input
                       type="number"
                       step="0.1"
@@ -4668,7 +4706,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>Bus Fare (Rs.)</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4681,7 +4719,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bike Distance (KM)</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bike Distance (KM)</label>
                     <input
                       type="number"
                       step="0.1"
@@ -4692,7 +4730,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bus Duration (Mins)</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bus Duration (Mins)</label>
                     <input
                       type="number"
                       placeholder="e.g. 30"
@@ -4702,7 +4740,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">Bike Duration (Mins)</label>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bike Duration (Mins)</label>
                     <input
                       type="number"
                       placeholder="e.g. 20"
@@ -4716,7 +4754,7 @@ const App: React.FC = () => {
                 {/* Row 2: Bus Stand Transit Details (The "Via" parameters) */}
                 <div className="grid grid-cols-1 md:grid-cols-8 gap-4 items-end bg-slate-50/50 p-4 rounded-2xl border border-slate-100/80">
                   <div className="space-y-1 text-left md:col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>Via Bus Stand</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(optional)</span>
                     </label>
@@ -4736,7 +4774,7 @@ const App: React.FC = () => {
                     </datalist>
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>From Office to BS (KM)</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4750,7 +4788,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>(From office to BS) Fare</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4763,7 +4801,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>From Office to BS (Mins)</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4776,7 +4814,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>BS to To Office (KM)</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4790,7 +4828,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>(BS to To office ) Fare</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>
@@ -4803,7 +4841,7 @@ const App: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
                       <span>BS to To Office (Mins)</span>
                       <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
                     </label>

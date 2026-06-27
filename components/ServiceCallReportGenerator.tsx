@@ -853,7 +853,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
             {/* 1. Division Name */}
             <div className="md:col-span-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Division Name</label>
+              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Division Name</label>
               <input
                 id="service-call-division"
                 type="text"
@@ -866,7 +866,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
             {/* 2. Date and Time */}
             <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Date</label>
+              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Date</label>
               <input
                 id="service-call-date"
                 type="date"
@@ -882,7 +882,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Time In</label>
+                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time In</label>
                 <input
                   id="service-call-time-in"
                   type="time"
@@ -895,7 +895,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 />
               </div>
               <div>
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Time Out</label>
+                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time Out</label>
                 <input
                   id="service-call-time-out"
                   type="time"
@@ -911,7 +911,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
             {/* 3. Office Attended and Call Given By */}
             <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Office Attended</label>
+              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Office Attended</label>
               <select
                 id="service-call-office-select"
                 value={uniqueOfficesList.includes(editingCall.officeAttended) ? editingCall.officeAttended : "custom"}
@@ -940,7 +940,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
             </div>
 
             <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Call Given By</label>
+              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Call Given By</label>
               <input
                 id="service-call-given-by"
                 type="text"
@@ -976,7 +976,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Details of Problem Reported</label>
+                      <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-1.5">Details of Problem Reported</label>
                       <textarea
                         placeholder="e.g. Passbook printer issue."
                         value={p.reported}
@@ -993,7 +993,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                       />
                     </div>
                     <div>
-                      <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Action Taken by System Manager</label>
+                      <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-1.5">Action Taken by System Manager</label>
                       <textarea
                         placeholder="e.g. Issue not resolved."
                         value={p.actionTaken}
@@ -1030,7 +1030,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
           <div className="grid grid-cols-1 gap-4 text-left">
             <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Pending issues</label>
+              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Pending issues</label>
               <input
                 id="service-call-other-issues"
                 type="text"
