@@ -1,0 +1,18 @@
+{
+  "short_name": "DiaryFlow",
+  "name": "Work Diary & Movement Tracker",
+  "description": "Professional tool to generate structured fortnightly work diaries and transport route logs.",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/?pwa=true",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "any"
+}
