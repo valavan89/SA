@@ -331,7 +331,8 @@ const numberToIndianWords = (num: number): string => {
 export const generateTACalculationsDoc = async (
   metadata: DiaryMetadata,
   activities: ActivityEntry[],
-  movements: MovementEntry[]
+  movements: MovementEntry[],
+  serviceCalls?: ServiceCallReport[]
 ) => {
   const designation = metadata.designation || 'System Administrator';
 
@@ -395,30 +396,49 @@ export const generateTACalculationsDoc = async (
       }
     }
 
-    // Purpose of visit calculation: join issues encountered, or fallback to sequential office locations
+    // Purpose of visit calculation: use details of problem reported in SCR on this date if available, or fallback to sequential office locations
     const matchingActivity = activities.find(a => (a.date || '').trim() === uDate);
+    const matchingCalls = serviceCalls ? serviceCalls.filter(sc => (sc.date || '').trim() === uDate) : [];
+    
     let purposeText = "";
 
-    if (matchingActivity) {
-      const distinctIssues = (matchingActivity.visits || [])
-        .map(v => v.issues?.trim())
-        .filter(issue => issue && issue !== "");
+    if (matchingCalls.length > 0) {
+      // Collect details of problem reported in SCR
+      const problemsReported = matchingCalls.flatMap(sc => 
+        (sc.problems || []).map(p => p.reported?.trim())
+      ).filter(Boolean);
       
-      if (distinctIssues.length > 0) {
-        purposeText = distinctIssues.join(", ");
-      } else {
-        const offices = (matchingActivity.visits || [])
-          .map(v => v.officeName?.trim())
-          .filter(o => o && o !== "");
-        if (offices.length > 0) {
-          purposeText = "Verification / Routine Inspection at " + offices.join(", ");
-        } else {
-          purposeText = "Routine inspection / maintenance";
-        }
+      if (problemsReported.length > 0) {
+        purposeText = problemsReported.join(", ");
       }
-    } else {
-      purposeText = "Routine inspection / maintenance";
     }
+
+    // Fallback to standard activity issues / offices visited if no SCR problems are reported
+    if (!purposeText) {
+      if (matchingActivity) {
+        const distinctIssues = (matchingActivity.visits || [])
+          .map(v => v.issues?.trim())
+          .filter(issue => issue && issue !== "");
+        
+        if (distinctIssues.length > 0) {
+          purposeText = distinctIssues.join(", ");
+        } else {
+          const offices = (matchingActivity.visits || [])
+            .map(v => v.officeName?.trim())
+            .filter(o => o && o !== "");
+          if (offices.length > 0) {
+            purposeText = "Verification / Routine Inspection at " + offices.join(", ");
+          } else {
+            purposeText = "Routine inspection / maintenance";
+          }
+        }
+      } else {
+        purposeText = "Routine inspection / maintenance";
+      }
+    }
+
+    // Auto sentence case for Purpose of visit
+    purposeText = toSentenceCase(purposeText);
 
     dateCalculations[uDate] = {
       food: foodAmount,

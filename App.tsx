@@ -1198,26 +1198,31 @@ const App: React.FC = () => {
     const keyOfficesMuthvel = "diary_profile_Muthvel R_offices_db";
     const savedOffices = localStorage.getItem(keyOfficesMuthvel);
     
+    const alreadyMigrated = localStorage.getItem("diary_profile_Muthvel R_migrated_v2") === "true";
+    const isCustomUploaded = localStorage.getItem("diary_profile_Muthvel R_custom_uploaded") === "true";
+
     let needsMigration = false;
-    if (savedOffices) {
-      try {
-        const parsed = JSON.parse(savedOffices);
-        if (Array.isArray(parsed)) {
-          needsMigration = parsed.some((item: any) => 
-            item.toOffice === "Neyveli 3" || 
-            item.toOffice === "Neyveli 2" || 
-            item.fromOffice === "Neyveli 3" ||
-            !item.toOffice.endsWith("S.O")
-          );
-          if (parsed.length !== 20) {
-            needsMigration = true;
+    if (!alreadyMigrated && !isCustomUploaded) {
+      if (savedOffices) {
+        try {
+          const parsed = JSON.parse(savedOffices);
+          if (Array.isArray(parsed)) {
+            needsMigration = parsed.some((item: any) => 
+              item.toOffice === "Neyveli 3" || 
+              item.toOffice === "Neyveli 2" || 
+              item.fromOffice === "Neyveli 3" ||
+              !item.toOffice.endsWith("S.O")
+            );
+            if (parsed.length !== 20) {
+              needsMigration = true;
+            }
           }
+        } catch (e) {
+          needsMigration = true;
         }
-      } catch (e) {
+      } else {
         needsMigration = true;
       }
-    } else {
-      needsMigration = true;
     }
 
     if (needsMigration) {
@@ -1322,6 +1327,9 @@ const App: React.FC = () => {
         setOfficesDb(getDefaultOfficesAndInterOfficesList("Muthvel R", activeAttached));
       }
     }
+
+    // Mark as migrated to prevent ever resetting their uploaded custom database on future reloads
+    localStorage.setItem("diary_profile_Muthvel R_migrated_v2", "true");
   }, []);
 
   const loadDefaultOfficesDb = (targetAttachedOffice?: string) => {
@@ -2074,24 +2082,37 @@ const App: React.FC = () => {
   const handleExecuteImport = () => {
     if (parsedEntries.length === 0) return;
 
+    let finalOffices: OfficeDatabaseEntry[] = [];
     if (importMode === 'overwrite') {
-      setOfficesDb(parsedEntries.sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice)));
+      finalOffices = parsedEntries.sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
     } else {
-      setOfficesDb(prev => {
-        const mergedMap = new Map<string, OfficeDatabaseEntry>();
-        prev.forEach(item => {
-          const key = `${item.fromOffice.toLowerCase().replace(/\s+/g,'')}-${item.toOffice.toLowerCase().replace(/\s+/g,'')}`;
-          mergedMap.set(key, item);
-        });
-        parsedEntries.forEach(item => {
-          const key = `${item.fromOffice.toLowerCase().replace(/\s+/g,'')}-${item.toOffice.toLowerCase().replace(/\s+/g,'')}`;
-          mergedMap.set(key, item);
-        });
-        return Array.from(mergedMap.values()).sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
+      const mergedMap = new Map<string, OfficeDatabaseEntry>();
+      officesDb.forEach(item => {
+        const key = `${item.fromOffice.toLowerCase().replace(/\s+/g,'')}-${item.toOffice.toLowerCase().replace(/\s+/g,'')}`;
+        mergedMap.set(key, item);
       });
+      parsedEntries.forEach(item => {
+        const key = `${item.fromOffice.toLowerCase().replace(/\s+/g,'')}-${item.toOffice.toLowerCase().replace(/\s+/g,'')}`;
+        mergedMap.set(key, item);
+      });
+      finalOffices = Array.from(mergedMap.values()).sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
     }
 
+    setOfficesDb(finalOffices);
+
+    // Save immediately to localStorage to ensure complete persistence on reload
+    const key = activeProfile === "Karikalvalavan R" ? "diary_offices_db" : `diary_profile_${activeProfile}_offices_db`;
+    localStorage.setItem(key, JSON.stringify(finalOffices));
+
+    // Also mark as migrated and custom uploaded to prevent future automatic overrides
+    localStorage.setItem(`diary_profile_${activeProfile}_custom_uploaded`, "true");
+    localStorage.setItem("diary_profile_Muthvel R_migrated_v2", "true");
+
+    // Synchronously bump the modification timestamp to avoid stale cloud sync pull on reload
+    localStorage.setItem('diary_last_updated', Date.now().toString());
+
     setImportSuccess(`Successfully imported ${parsedEntries.length} offices into the route database!`);
+
     setParsedEntries([]);
     setTimeout(() => {
       setImportSuccess('');
@@ -2674,16 +2695,16 @@ const App: React.FC = () => {
                 details: computeDetails([{ id: 'pad', officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }], dStr, dNm, 'Bus')
               };
             });
-            generateTACalculationsDoc(metadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements);
+            generateTACalculationsDoc(metadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements, serviceCalls);
             setConfirmModal(null);
           },
           onCancel: () => {
-            generateTACalculationsDoc(metadata, monthActivities, monthMovements);
+            generateTACalculationsDoc(metadata, monthActivities, monthMovements, serviceCalls);
             setConfirmModal(null);
           }
         });
       } else {
-        generateTACalculationsDoc(metadata, monthActivities, monthMovements);
+        generateTACalculationsDoc(metadata, monthActivities, monthMovements, serviceCalls);
       }
     };
 
