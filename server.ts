@@ -57,7 +57,7 @@ function saveSyncStore() {
 // API Routes
 // API Routes
 const ACCOUNTS_FILE = path.join(process.cwd(), "web-sync-accounts.json");
-let accountsStore: Record<string, { email: string; passcode: string; payload: any; updatedAt: number }> = {};
+let accountsStore: Record<string, { email: string; passcode: string; payload: any; updatedAt: number; history?: Array<{ payload: any; updatedAt: number }> }> = {};
 
 // Load previous accounts store if exists
 try {
@@ -233,6 +233,8 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
         success: true, 
         isNew: false, 
         payload: existingAccount.payload,
+        history: existingAccount.history || [],
+        updatedAt: existingAccount.updatedAt || Date.now(),
         message: "Logged in successfully! Pulling latest web storage data..." 
       });
     } else {
@@ -241,7 +243,8 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
         email,
         passcode: cleanPasscode,
         payload: null,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        history: []
       };
       saveAccountsStore();
       console.log(`[Web Sync] Registered new account: ${email}`);
@@ -249,6 +252,8 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
         success: true, 
         isNew: true, 
         payload: null,
+        history: [],
+        updatedAt: accountsStore[email].updatedAt,
         message: "New Cloud Web Space created successfully! Your current Local data will be synced automatically." 
       });
     }
@@ -275,6 +280,26 @@ app.post("/api/web-storage/save", (req, res) => {
       if (account.passcode !== cleanPasscode) {
         return res.status(401).json({ success: false, message: "Incorrect passcode. Server backup rejected." });
       }
+      
+      // Keep up to 5 rolling historical backups before overwriting active payload
+      if (account.payload) {
+        if (!account.history) {
+          account.history = [];
+        }
+        
+        // Only backup if the payload changed
+        const isIdentical = JSON.stringify(account.payload) === JSON.stringify(payload);
+        if (!isIdentical) {
+          account.history.unshift({
+            payload: account.payload,
+            updatedAt: account.updatedAt
+          });
+          if (account.history.length > 5) {
+            account.history = account.history.slice(0, 5);
+          }
+        }
+      }
+      
       account.payload = payload;
       account.updatedAt = Date.now();
     } else {
@@ -283,12 +308,18 @@ app.post("/api/web-storage/save", (req, res) => {
         email,
         passcode: cleanPasscode,
         payload,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        history: []
       };
     }
     
     saveAccountsStore();
-    return res.json({ success: true, message: "Workspace backup synced to persistent cloud storage successfully!" });
+    return res.json({ 
+      success: true, 
+      message: "Workspace backup synced to persistent cloud storage successfully!",
+      updatedAt: accountsStore[email].updatedAt,
+      history: accountsStore[email].history || []
+    });
   } catch (error: any) {
     console.error("[Web Sync] Save error:", error);
     return res.status(500).json({ success: false, message: error.message });

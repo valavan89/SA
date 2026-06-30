@@ -58,19 +58,15 @@ const PROFILE_3_OFFICES = [
 ];
 
 const getProfileBaseOffices = (profileName: string): string[] => {
-  if (profileName === "Muthvel R") {
-    return PROFILE_2_OFFICES;
-  }
-  if (profileName === "Sivaraj S") {
-    return PROFILE_3_OFFICES;
-  }
-  return PROFILE_1_OFFICES;
+  return [];
 };
 
 const getProfileAttachedOffice = (profileName: string): string => {
-  if (profileName === "Muthvel R") return "Neyveli 3 S.O";
-  if (profileName === "Sivaraj S") return "Annamalainagar SO";
-  return "Kurinjipadi SO";
+  const norm = profileName === "Default Profile" ? "Karikalvalavan R" : profileName;
+  if (norm === "Karikalvalavan R") return "Kurinjipadi SO";
+  if (norm === "Muthvel R") return "Neyveli 3 S.O";
+  if (norm === "Sivaraj S") return "Annamalainagar SO";
+  return "";
 };
 
 const CORRECTIONS: Record<string, string> = {
@@ -631,27 +627,18 @@ const App: React.FC = () => {
   const [profiles, setProfiles] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('diary_profiles_list');
-      let parsed = saved ? JSON.parse(saved) as string[] : ["Karikalvalavan R", "Muthvel R", "Sivaraj S"];
+      if (!saved) {
+        const initialList = ["Karikalvalavan R", "Muthvel R", "Sivaraj S"];
+        localStorage.setItem('diary_profiles_list', JSON.stringify(initialList));
+        return initialList;
+      }
+      let parsed = JSON.parse(saved) as string[];
       parsed = parsed.map(p => p === "Default Profile" ? "Karikalvalavan R" : p);
-      
-      // Ensure all three profiles are present by default
-      ["Karikalvalavan R", "Muthvel R", "Sivaraj S"].forEach(p => {
-        if (!parsed.includes(p)) {
-          parsed.push(p);
-        }
-      });
       return parsed;
     } catch {
       return ["Karikalvalavan R", "Muthvel R", "Sivaraj S"];
     }
   });
-
-  // Profile Security & Uniqueness States
-  const [unlockedProfiles, setUnlockedProfiles] = useState<string[]>([]);
-  const [lockedProfilePending, setLockedProfilePending] = useState<string | null>(null);
-  const [profileUnlockInput, setProfileUnlockInput] = useState<string>('');
-  const [profileUnlockError, setProfileUnlockError] = useState<string>('');
-  const [recoverySending, setRecoverySending] = useState<boolean>(false);
 
   // Email setup states
   const [emailSetupPendingProfile, setEmailSetupPendingProfile] = useState<string | null>(null);
@@ -659,13 +646,6 @@ const App: React.FC = () => {
   const [emailSetupError, setEmailSetupError] = useState<string>('');
   const [emailSetupDismissed, setEmailSetupDismissed] = useState<boolean>(false);
   const [profileEmailInputError, setProfileEmailInputError] = useState<string>('');
-
-  // Passkey setup/change states
-  const [passkeySetupPendingProfile, setPasskeySetupPendingProfile] = useState<string | null>(null);
-  const [passkeySetupOldInput, setPasskeySetupOldInput] = useState<string>('');
-  const [passkeySetupNewInput, setPasskeySetupNewInput] = useState<string>('');
-  const [passkeySetupConfirmInput, setPasskeySetupConfirmInput] = useState<string>('');
-  const [passkeySetupError, setPasskeySetupError] = useState<string>('');
 
   const loadedProfileRef = useRef<string>(
     localStorage.getItem('diary_active_profile') === "Default Profile"
@@ -686,22 +666,6 @@ const App: React.FC = () => {
 
     const rawProf = localStorage.getItem('diary_active_profile') || "Karikalvalavan R";
     const actProf = rawProf === "Default Profile" ? "Karikalvalavan R" : rawProf;
-    const key = actProf === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${actProf}_metadata`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          month: currentMonth,
-          year: currentYear,
-          fortnight: currentFortnight,
-          submissionDate: todayStr,
-        };
-      } catch (e) {
-        // Fallback
-      }
-    }
 
     let dName = '';
     let dDesig = 'System Administrator';
@@ -717,7 +681,7 @@ const App: React.FC = () => {
       dName = actProf;
     }
 
-    return {
+    const defaultMeta = {
       name: dName,
       designation: dDesig,
       office: dOffice,
@@ -727,19 +691,34 @@ const App: React.FC = () => {
       year: currentYear,
       fortnight: currentFortnight,
     };
+
+    const key = actProf === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${actProf}_metadata`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          ...defaultMeta,
+          ...parsed,
+          month: currentMonth,
+          year: currentYear,
+          fortnight: currentFortnight,
+          submissionDate: todayStr,
+        };
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    return defaultMeta;
   });
 
   const isCurrentProfileLocked = useMemo(() => {
-    const hasPasskey = !!localStorage.getItem(`diary_profile_${activeProfile}_passkey`);
-    return hasPasskey && !unlockedProfiles.includes(activeProfile);
-  }, [activeProfile, unlockedProfiles]);
+    return false;
+  }, []);
 
   useEffect(() => {
-    // If active profile is unlocked (or doesn't have a passkey), check if SCR email is set
-    const hasPasskey = !!localStorage.getItem(`diary_profile_${activeProfile}_passkey`);
-    const isUnlocked = !hasPasskey || unlockedProfiles.includes(activeProfile);
-    
-    if (isUnlocked && !emailSetupDismissed) {
+    if (!emailSetupDismissed) {
       const linkedEmail = metadata.scrEmailRecipient || '';
       if (!linkedEmail && !emailSetupPendingProfile) {
         setEmailSetupPendingProfile(activeProfile);
@@ -747,7 +726,7 @@ const App: React.FC = () => {
         setEmailSetupError('');
       }
     }
-  }, [activeProfile, unlockedProfiles, metadata.scrEmailRecipient, emailSetupPendingProfile, emailSetupDismissed]);
+  }, [activeProfile, metadata.scrEmailRecipient, emailSetupPendingProfile, emailSetupDismissed]);
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
@@ -782,6 +761,22 @@ const App: React.FC = () => {
   const [webSyncStatus, setWebSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'loading'>('idle');
   const [webSyncErrorMessage, setWebSyncErrorMessage] = useState('');
   const [isInitialSyncCompleted, setIsInitialSyncCompleted] = useState(false);
+  const [webSyncBackups, setWebSyncBackups] = useState<Array<{ payload: any; updatedAt: number }>>([]);
+  const [webSyncUpdatedAt, setWebSyncUpdatedAt] = useState<number | null>(() => {
+    const saved = localStorage.getItem('diary_websync_updated_at');
+    return saved ? parseInt(saved, 10) : null;
+  });
+  const [activeCloudPayload, setActiveCloudPayload] = useState<any | null>(null);
+
+  // Free up local storage quota immediately
+  useEffect(() => {
+    try {
+      localStorage.removeItem('diary_websync_active_payload');
+    } catch (e) {
+      console.warn('Failed to clean up diary_websync_active_payload:', e);
+    }
+  }, []);
+
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPasscode, setLoginPasscode] = useState('');
@@ -790,7 +785,7 @@ const App: React.FC = () => {
     const payload: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key && key.startsWith('diary_') && key !== 'diary_websync_user') {
+      if (key && key.startsWith('diary_') && !key.startsWith('diary_websync_')) {
         payload[key] = localStorage.getItem(key) || '';
       }
     }
@@ -850,6 +845,20 @@ const App: React.FC = () => {
         const errorData = await response.json().catch(() => ({ message: 'Save failed' }));
         throw new Error(errorData.message || 'Server error saving data.');
       }
+      
+      const resData = await response.json();
+      if (resData.success) {
+        if (resData.updatedAt) {
+          localStorage.setItem('diary_websync_updated_at', resData.updatedAt.toString());
+          setWebSyncUpdatedAt(resData.updatedAt);
+        }
+        if (resData.history) {
+          setWebSyncBackups(resData.history);
+        }
+        // Save the active payload we just saved to cloud
+        setActiveCloudPayload(payload);
+      }
+      
       setWebSyncStatus('synced');
     } catch (e: any) {
       console.error('[Web Storage Auto-sync] Failure:', e);
@@ -890,38 +899,49 @@ const App: React.FC = () => {
         }
 
         const resData = await response.json();
-        if (resData.success && resData.payload) {
-          const cloudPayload = resData.payload;
-          const cloudTimestamp = parseInt(cloudPayload['diary_last_updated'] || '0', 10);
-          const localTimestamp = parseInt(localStorage.getItem('diary_last_updated') || '0', 10);
-
-          const hasLocalTimestamp = !!localStorage.getItem('diary_last_updated');
-          let shouldPull = false;
-
-          if (cloudTimestamp > 0 || localTimestamp > 0) {
-            shouldPull = (cloudTimestamp > localTimestamp) || (!hasLocalTimestamp && cloudTimestamp > 0);
-          } else {
-            // Legacy fallback if no timestamps are present: do identicalness check
-            let isIdentical = true;
-            Object.entries(cloudPayload).forEach(([key, val]) => {
-              if (localStorage.getItem(key) !== val) {
-                isIdentical = false;
-              }
-            });
-            shouldPull = !isIdentical;
+        if (resData.success) {
+          if (resData.history) {
+            setWebSyncBackups(resData.history);
           }
+          if (resData.updatedAt) {
+            localStorage.setItem('diary_websync_updated_at', resData.updatedAt.toString());
+            setWebSyncUpdatedAt(resData.updatedAt);
+          }
+          if (resData.payload) {
+            setActiveCloudPayload(resData.payload);
+            
+            const cloudPayload = resData.payload;
+            const cloudTimestamp = parseInt(cloudPayload['diary_last_updated'] || '0', 10);
+            const localTimestamp = parseInt(localStorage.getItem('diary_last_updated') || '0', 10);
 
-          if (shouldPull) {
-            // Restore entire payload from cloud!
-            Object.entries(cloudPayload).forEach(([key, val]) => {
-              if (typeof val === 'string') {
-                localStorage.setItem(key, val);
-              }
-            });
-            sessionStorage.setItem('diary_sync_reloaded', '1');
-            setWebSyncStatus('synced');
-            window.location.reload();
-            return;
+            const hasLocalTimestamp = !!localStorage.getItem('diary_last_updated');
+            let shouldPull = false;
+
+            if (cloudTimestamp > 0 || localTimestamp > 0) {
+              shouldPull = (cloudTimestamp > localTimestamp) || (!hasLocalTimestamp && cloudTimestamp > 0);
+            } else {
+              // Legacy fallback if no timestamps are present: do identicalness check
+              let isIdentical = true;
+              Object.entries(cloudPayload).forEach(([key, val]) => {
+                if (localStorage.getItem(key) !== val) {
+                  isIdentical = false;
+                }
+              });
+              shouldPull = !isIdentical;
+            }
+
+            if (shouldPull) {
+              // Restore entire payload from cloud!
+              Object.entries(cloudPayload).forEach(([key, val]) => {
+                if (typeof val === 'string') {
+                  localStorage.setItem(key, val);
+                }
+              });
+              sessionStorage.setItem('diary_sync_reloaded', '1');
+              setWebSyncStatus('synced');
+              window.location.reload();
+              return;
+            }
           }
         }
         
@@ -1388,16 +1408,7 @@ const App: React.FC = () => {
   };
 
   const switchProfile = (newProfileName: string) => {
-    // 1. Check Passkey Lock
-    const passkey = localStorage.getItem(`diary_profile_${newProfileName}_passkey`);
-    if (passkey && !unlockedProfiles.includes(newProfileName)) {
-      setLockedProfilePending(newProfileName);
-      setProfileUnlockInput('');
-      setProfileUnlockError('');
-      return;
-    }
-
-    // 2. Check Email Setup
+    // 1. Check Email Setup
     const emailKey = newProfileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${newProfileName}_metadata`;
     const savedMeta = localStorage.getItem(emailKey);
     let linkedEmail = '';
@@ -1561,37 +1572,199 @@ const App: React.FC = () => {
     // Service Calls
     const savedCalls = getNewVal('service_calls');
     setServiceCalls(savedCalls ? JSON.parse(savedCalls) : []);
+  };
 
-    // 4. Force passkey setting if no passkey exists for the newly switched profile!
-    const hasPasskey = !!localStorage.getItem(`diary_profile_${newProfileName}_passkey`);
-    if (!hasPasskey) {
-      setTimeout(() => {
-        setPasskeySetupPendingProfile(newProfileName);
-        setPasskeySetupOldInput('');
-        setPasskeySetupNewInput('');
-        setPasskeySetupConfirmInput('');
-        setPasskeySetupError('');
-      }, 500);
+  const purgeKeysForProfile = (profileName: string, keepProfile: boolean = false) => {
+    const prefixExact = profileName === "Karikalvalavan R" ? "diary_" : `diary_profile_${profileName}_`;
+    
+    // Find variants of the name to purge legacy/duplicate data
+    const variants = [profileName];
+    if (profileName.endsWith(" S")) {
+      variants.push(profileName.slice(0, -2).trim());
+    }
+    if (profileName.endsWith(" R")) {
+      variants.push(profileName.slice(0, -2).trim());
+    }
+    if (profileName === "Muthvel R") {
+      variants.push("Muthuvel");
+      variants.push("Muthuvel R");
+    }
+    
+    const prefixes = variants.map(v => v === "Karikalvalavan R" ? "diary_" : `diary_profile_${v}_`);
+
+    // Preserve email recipient if we are keeping the profile
+    let preservedEmail = '';
+    if (keepProfile) {
+      const emailKey = profileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${profileName}_metadata`;
+      const savedMeta = localStorage.getItem(emailKey);
+      if (savedMeta) {
+        try {
+          const parsed = JSON.parse(savedMeta);
+          preservedEmail = parsed.scrEmailRecipient || '';
+        } catch {}
+      }
+    }
+
+    // 1. Delete from localStorage
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key) {
+        if (profileName === "Karikalvalavan R") {
+          if (key.startsWith("diary_") && !key.includes("_profile_") && !key.startsWith("diary_websync_") && key !== "diary_profiles_list" && key !== "diary_active_profile") {
+            localStorage.removeItem(key);
+          }
+        } else {
+          const matchesAnyPrefix = prefixes.some(p => key.startsWith(p));
+          const matchesExactKey = key === `diary_profile_${profileName}`;
+          const matchesVariantKey = variants.some(v => key === `diary_profile_${v}`);
+          if (matchesAnyPrefix || matchesExactKey || matchesVariantKey) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    }
+
+    // 2. Delete from activeCloudPayload too
+    if (activeCloudPayload) {
+      const nextCloud = { ...activeCloudPayload };
+      Object.keys(nextCloud).forEach(key => {
+        if (profileName === "Karikalvalavan R") {
+          if (key.startsWith("diary_") && !key.includes("_profile_") && !key.startsWith("diary_websync_") && key !== "diary_profiles_list" && key !== "diary_active_profile") {
+            delete nextCloud[key];
+          }
+        } else {
+          const matchesAnyPrefix = prefixes.some(p => key.startsWith(p));
+          const matchesExactKey = key === `diary_profile_${profileName}`;
+          const matchesVariantKey = variants.some(v => key === `diary_profile_${v}`);
+          if (matchesAnyPrefix || matchesExactKey || matchesVariantKey) {
+            delete nextCloud[key];
+          }
+        }
+      });
+      setActiveCloudPayload(nextCloud);
+    }
+
+    // 3. Re-save preserved email recipient if needed
+    if (keepProfile && preservedEmail) {
+      const emailKey = profileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${profileName}_metadata`;
+      const newMeta = { scrEmailRecipient: preservedEmail };
+      localStorage.setItem(emailKey, JSON.stringify(newMeta));
+      if (activeCloudPayload) {
+        setActiveCloudPayload(prev => prev ? { ...prev, [emailKey]: JSON.stringify(newMeta) } : null);
+      }
     }
   };
 
   const addNewProfile = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    
+    // Check if profile already exists in the current active list
     if (profiles.map(p => p.toLowerCase()).includes(trimmed.toLowerCase())) {
       setConfirmModal({
         title: "Profile Already Exists",
-        message: `A profile named "${trimmed}" already exists. Please choose a different name.`,
+        message: `A profile named "${trimmed}" already exists in your active list. Please choose a different name.`,
         confirmText: "Close",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
       });
       return;
     }
-    const updated = [...profiles, trimmed];
-    setProfiles(updated);
-    localStorage.setItem('diary_profiles_list', JSON.stringify(updated));
-    switchProfile(trimmed);
+
+    // Check if previous data exists for this name in localStorage or activeCloudPayload
+    const prefixExact = trimmed === "Karikalvalavan R" ? "diary_" : `diary_profile_${trimmed}_`;
+    const variants = [trimmed];
+    if (trimmed.endsWith(" S")) {
+      variants.push(trimmed.slice(0, -2).trim());
+    }
+    if (trimmed.endsWith(" R")) {
+      variants.push(trimmed.slice(0, -2).trim());
+    }
+    if (trimmed === "Muthvel R") {
+      variants.push("Muthuvel");
+      variants.push("Muthuvel R");
+    }
+    const prefixes = variants.map(v => v === "Karikalvalavan R" ? "diary_" : `diary_profile_${v}_`);
+
+    let hasPreExistingData = false;
+    
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k !== "diary_profiles_list" && k !== "diary_active_profile") {
+        if (prefixes.some(p => k.startsWith(p)) || variants.some(v => k === `diary_profile_${v}`)) {
+          hasPreExistingData = true;
+          break;
+        }
+      }
+    }
+    
+    if (!hasPreExistingData && activeCloudPayload) {
+      for (const k of Object.keys(activeCloudPayload)) {
+        if (k !== "diary_profiles_list" && k !== "diary_active_profile") {
+          if (prefixes.some(p => k.startsWith(p)) || variants.some(v => k === `diary_profile_${v}`)) {
+            hasPreExistingData = true;
+            break;
+          }
+        }
+      }
+    }
+
+    const proceedCreateFresh = () => {
+      // Clear any pre-existing keys for this profile name (exact and variants)
+      purgeKeysForProfile(trimmed);
+
+      // Add profile and switch to it with fresh empty default state
+      const updated = [...profiles, trimmed];
+      setProfiles(updated);
+      localStorage.setItem('diary_profiles_list', JSON.stringify(updated));
+      switchProfile(trimmed);
+      setConfirmModal(null);
+      
+      // Auto-sync
+      setTimeout(() => {
+        syncWorkspaceToWebStorage();
+      }, 200);
+    };
+
+    const proceedRestore = () => {
+      // If the data is only in the cloud, copy it to localStorage so it gets loaded correctly
+      if (activeCloudPayload) {
+        Object.entries(activeCloudPayload).forEach(([key, val]) => {
+          if (key !== "diary_profiles_list" && key !== "diary_active_profile" && typeof val === 'string') {
+            const isMatch = prefixes.some(p => key.startsWith(p)) || variants.some(v => key === `diary_profile_${v}`);
+            if (isMatch) {
+              localStorage.setItem(key, val);
+            }
+          }
+        });
+      }
+
+      const updated = [...profiles, trimmed];
+      setProfiles(updated);
+      localStorage.setItem('diary_profiles_list', JSON.stringify(updated));
+      switchProfile(trimmed);
+      setConfirmModal(null);
+      
+      // Auto-sync
+      setTimeout(() => {
+        syncWorkspaceToWebStorage();
+      }, 200);
+    };
+
+    if (hasPreExistingData) {
+      setConfirmModal({
+        title: "Restore Previous Profile Data?",
+        message: `Existing stored data was found for "${trimmed}". Would you like to restore and load this previous data, or discard it and create a fresh new profile?`,
+        confirmText: "Restore Previous Data",
+        cancelText: "Clear & Create Fresh",
+        accentColor: "blue",
+        onConfirm: proceedRestore,
+        onCancel: proceedCreateFresh
+      });
+    } else {
+      // Create clean fresh profile
+      proceedCreateFresh();
+    }
   };
 
 
@@ -2471,8 +2644,15 @@ const App: React.FC = () => {
       return `${to24hDot(v.startTime)} to ${to24hDot(v.endTime)} at ${v.officeName}${issuePart}`;
     }).filter(s => s !== "");
 
-    return [defaultOfficeLine, ...visitLines].filter(Boolean).join('\n');
-  }, [attachedOffice]);
+    const lastVisit = realVisits[realVisits.length - 1];
+    const returnTravelDur = getTravelDur(lastVisit.officeName, mode);
+    const reachedAttachedTime = addMinutesToTime(lastVisit.endTime, returnTravelDur);
+    const eveningOfficeLine = (reachedAttachedTime < "17:00")
+      ? `${to24hDot(reachedAttachedTime)} to 17.00 at ${attachedOffice}., to attend the regular work.`
+      : "";
+
+    return [defaultOfficeLine, ...visitLines, eveningOfficeLine].filter(Boolean).join('\n');
+  }, [attachedOffice, officesDb]);
 
   const generateMovementsForDay = (activity: ActivityEntry): MovementEntry[] => {
     const { date, transportMode, visits, leaveType, workedOnHoliday } = activity;
@@ -2740,7 +2920,17 @@ const App: React.FC = () => {
         localStorage.setItem('diary_websync_user', JSON.stringify(loggedInUser));
         setWebSyncUser(loggedInUser);
 
+        if (resData.history) {
+          setWebSyncBackups(resData.history);
+        }
+
+        if (resData.updatedAt) {
+          localStorage.setItem('diary_websync_updated_at', resData.updatedAt.toString());
+          setWebSyncUpdatedAt(resData.updatedAt);
+        }
+
         if (resData.payload) {
+          setActiveCloudPayload(resData.payload);
           // Overwrite with downloaded workspace values!
           Object.entries(resData.payload).forEach(([key, val]) => {
             if (typeof val === 'string') {
@@ -2793,8 +2983,12 @@ const App: React.FC = () => {
       accentColor: "rose",
       onConfirm: () => {
         localStorage.removeItem('diary_websync_user');
+        localStorage.removeItem('diary_websync_updated_at');
         setWebSyncUser(null);
         setWebSyncStatus('idle');
+        setWebSyncBackups([]);
+        setWebSyncUpdatedAt(null);
+        setActiveCloudPayload(null);
         setConfirmModal({
           title: "Disconnected",
           message: "Web Sync disconnected. This device is now in Offline Local Storage mode.",
@@ -2805,6 +2999,29 @@ const App: React.FC = () => {
             setLoginModalOpen(false);
           }
         });
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
+
+  const handleRestoreFromHistory = (backup: { payload: any; updatedAt: number }) => {
+    setConfirmModal({
+      title: "Rollback Workspace? ⚠️",
+      message: `Are you sure you want to restore the backup from ${new Date(backup.updatedAt).toLocaleString()}? This will replace your current local entries with this historical version.`,
+      confirmText: "Yes, Rollback",
+      cancelText: "No, Cancel",
+      accentColor: "rose",
+      onConfirm: () => {
+        // Overwrite local storage
+        Object.entries(backup.payload).forEach(([key, val]) => {
+          if (typeof val === 'string') {
+            localStorage.setItem(key, val);
+          }
+        });
+        
+        // Also ensure active profile and states are reloaded
+        sessionStorage.setItem('diary_sync_reloaded', '1');
+        window.location.reload();
       },
       onCancel: () => setConfirmModal(null)
     });
@@ -3098,83 +3315,6 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const handleForgotPasskey = async (pName: string) => {
-    const emailKey = pName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${pName}_metadata`;
-    const savedMetaStr = localStorage.getItem(emailKey);
-    let linkedEmail = '';
-    if (savedMetaStr) {
-      try {
-        const parsed = JSON.parse(savedMetaStr);
-        linkedEmail = parsed.scrEmailRecipient || '';
-      } catch {}
-    }
-
-    if (!linkedEmail) {
-      alert(`No linked SCR email was found for profile "${pName}". Passkey recovery cannot be sent automatically. Please check your other profiles or contact your system administrator.`);
-      return;
-    }
-
-    const passkey = localStorage.getItem(`diary_profile_${pName}_passkey`);
-    if (!passkey) {
-      alert(`No passkey is configured for the profile "${pName}".`);
-      return;
-    }
-
-    try {
-      let token = localStorage.getItem('google_access_token');
-      const tokenExpiryStr = localStorage.getItem('google_access_token_expires_at');
-      const tokenExpiry = tokenExpiryStr ? parseInt(tokenExpiryStr, 10) : 0;
-      
-      if (!token || tokenExpiry < Date.now()) {
-        alert(`To send the recovery email, we need to authenticate with Google. Click OK to sign in and send the passkey to your linked SCR email: ${linkedEmail}`);
-        const result = await googleSignIn(linkedEmail);
-        if (!result?.accessToken) {
-          alert("Failed to authenticate with Google. Passkey recovery aborted.");
-          return;
-        }
-        token = result.accessToken;
-      }
-
-      setRecoverySending(true);
-      
-      const emailSubject = `🔑 Passkey Recovery: Profile "${pName}"`;
-      const emailBody = `Hi,\n\nYou requested passkey recovery for your Work Diary profile "${pName}".\n\nYour passkey is: ${passkey}\n\nBest regards,\nDiaryFlow Pro`;
-      
-      await sendEmailWithAttachments(
-        token!,
-        linkedEmail,
-        emailSubject,
-        emailBody,
-        []
-      );
-      
-      alert(`Success! Passkey recovery email has been sent directly to the linked SCR email: ${linkedEmail}. Please check your inbox.`);
-    } catch (err: any) {
-      console.error("Failed to send recovery email:", err);
-      alert(`Failed to send recovery email: ${err.message || err}. Please check your connection and try again.`);
-    } finally {
-      setRecoverySending(false);
-    }
-  };
-
-  const handlePendingUnlockSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!lockedProfilePending) return;
-    
-    const savedPasskey = localStorage.getItem(`diary_profile_${lockedProfilePending}_passkey`);
-    if (profileUnlockInput === savedPasskey) {
-      const pName = lockedProfilePending;
-      setUnlockedProfiles(prev => [...prev, pName]);
-      setLockedProfilePending(null);
-      setProfileUnlockInput('');
-      setProfileUnlockError('');
-      
-      // Continue to profile load checks
-      switchProfile(pName);
-    } else {
-      setProfileUnlockError('Incorrect passkey! Please try again.');
-    }
-  };
 
   const handleEmailSetupSubmit = (e?: React.FormEvent, isLinkAction?: boolean) => {
     if (e) e.preventDefault();
@@ -3229,116 +3369,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePasskeySetupSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!passkeySetupPendingProfile) return;
-
-    const currentPasskey = localStorage.getItem(`diary_profile_${passkeySetupPendingProfile}_passkey`);
-    
-    if (currentPasskey) {
-      if (passkeySetupOldInput !== currentPasskey) {
-        setPasskeySetupError('Incorrect old passkey!');
-        return;
-      }
-    }
-
-    if (!passkeySetupNewInput.trim()) {
-      setPasskeySetupError('New passkey cannot be empty.');
-      return;
-    }
-
-    if (passkeySetupNewInput !== passkeySetupConfirmInput) {
-      setPasskeySetupError('New passkeys do not match!');
-      return;
-    }
-
-    // Save the new passkey!
-    localStorage.setItem(`diary_profile_${passkeySetupPendingProfile}_passkey`, passkeySetupNewInput.trim());
-    
-    if (!unlockedProfiles.includes(passkeySetupPendingProfile)) {
-      setUnlockedProfiles(prev => [...prev, passkeySetupPendingProfile]);
-    }
-
-    alert(`Successfully ${currentPasskey ? 'changed' : 'configured'} passkey for profile "${passkeySetupPendingProfile}"!`);
-    
-    setPasskeySetupPendingProfile(null);
-    setPasskeySetupOldInput('');
-    setPasskeySetupNewInput('');
-    setPasskeySetupConfirmInput('');
-    setPasskeySetupError('');
-  };
-
-  if (isCurrentProfileLocked) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center px-4 font-inter">
-        <div className="w-full max-w-md bg-slate-900 rounded-[2.5rem] border border-slate-800 p-8 shadow-2xl text-center space-y-6">
-          <div className="mx-auto w-16 h-16 bg-blue-500/10 text-blue-400 rounded-3xl flex items-center justify-center border border-blue-500/20">
-            <Lock size={28} className="animate-pulse" />
-          </div>
-          
-          <div className="space-y-1">
-            <h2 className="text-xl font-black text-white uppercase tracking-tight">Profile Locked</h2>
-            <p className="text-xs text-slate-400 font-medium">
-              Profile <span className="text-slate-200 font-extrabold">"{activeProfile}"</span> is secured. Please enter your passkey to unlock.
-            </p>
-          </div>
-
-          <form 
-            onSubmit={(e) => {
-              e.preventDefault();
-              const savedPasskey = localStorage.getItem(`diary_profile_${activeProfile}_passkey`);
-              if (profileUnlockInput === savedPasskey) {
-                setUnlockedProfiles(prev => [...prev, activeProfile]);
-                setProfileUnlockInput('');
-                setProfileUnlockError('');
-              } else {
-                setProfileUnlockError('Incorrect passkey! Please try again.');
-              }
-            }}
-            className="space-y-4 text-left"
-          >
-            <div>
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5 block">Enter Passkey</label>
-              <input
-                type="password"
-                required
-                placeholder="••••"
-                maxLength={20}
-                value={profileUnlockInput}
-                onChange={(e) => setProfileUnlockInput(e.target.value)}
-                className="w-full px-4 py-3.5 bg-slate-950 border border-slate-800 rounded-2xl text-center text-white tracking-widest font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-lg transition-all"
-                autoFocus
-              />
-              {profileUnlockError && (
-                <p className="text-[10px] text-rose-400 font-bold mt-1.5 text-center">{profileUnlockError}</p>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg border-0"
-            >
-              🔓 Unlock Profile
-            </button>
-          </form>
-
-          <div className="pt-4 border-t border-slate-800/60 flex flex-col gap-2.5">
-            <button
-              type="button"
-              disabled={recoverySending}
-              onClick={() => handleForgotPasskey(activeProfile)}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-bold tracking-wide transition-all bg-transparent border-0 cursor-pointer disabled:opacity-50"
-            >
-              {recoverySending ? "Sending Email..." : "🔑 Forgot Passkey? Recover via Linked SCR Email"}
-            </button>
-            <p className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
-              Note: Recovery sends your passkey to your profile-linked SCR email.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20 font-inter text-slate-900">
@@ -3564,22 +3594,18 @@ const App: React.FC = () => {
                           setProfiles(finalProfiles);
                           localStorage.setItem('diary_profiles_list', JSON.stringify(finalProfiles));
                           
-                          // Delete from localStorage all profile keys
-                          if (activeProfile === "Karikalvalavan R") {
-                            ['metadata', 'activities', 'movements', 'offices_db', 'attached_office', 'inter_office_db'].forEach(k => {
-                              localStorage.removeItem('diary_' + k);
-                            });
-                          } else {
-                            const prefix = `diary_profile_${activeProfile}_`;
-                            ['metadata', 'activities', 'movements', 'offices_db', 'attached_office', 'inter_office_db'].forEach(k => {
-                              localStorage.removeItem(prefix + k);
-                            });
-                          }
+                          // Delete from localStorage and cloud payload all profile keys using helper
+                          purgeKeysForProfile(activeProfile);
                           
                           // Switch back to next profile remaining or Karikalvalavan R
                           const nextProfile = finalProfiles[0];
                           switchProfile(nextProfile);
                           setConfirmModal(null);
+
+                          // Sync to Cloud immediately to overwrite
+                          setTimeout(() => {
+                            syncWorkspaceToWebStorage();
+                          }, 200);
                         }
                       });
                     }}
@@ -3632,8 +3658,8 @@ const App: React.FC = () => {
             <section className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm" id="profile-section">
                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-4 flex items-center gap-2" id="profile-heading"><User size={14}/> Professional Profile</label>
                <div className="space-y-3">
-                  <input type="text" id="profile-name-input" placeholder="Full Name" value={metadata.name} onChange={e => setMetadata({...metadata, name: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
-                  <input type="text" id="profile-office-input" placeholder="Sub Division / HO (e.g. Chidambaram HO)" value={metadata.office} onChange={e => setMetadata({...metadata, office: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
+                  <input type="text" id="profile-name-input" placeholder="Full Name" value={metadata.name || ''} onChange={e => setMetadata({...metadata, name: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
+                  <input type="text" id="profile-office-input" placeholder="Sub Division / HO (e.g. Chidambaram HO)" value={metadata.office || ''} onChange={e => setMetadata({...metadata, office: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
                   <div>
                     <input 
                       type="email" 
@@ -3657,28 +3683,14 @@ const App: React.FC = () => {
                     )}
                   </div>
                   
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPasskeySetupPendingProfile(activeProfile);
-                        setPasskeySetupOldInput('');
-                        setPasskeySetupNewInput('');
-                        setPasskeySetupConfirmInput('');
-                        setPasskeySetupError('');
-                      }}
-                      className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-slate-200 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                    >
-                      🔒 Change Passkey PIN
-                    </button>
-                  </div>
+
                </div>
             </section>
             <section className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm animate-fade-in" id="submission-section">
                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-4 flex items-center gap-2"><MapPin size={14}/> Submission Info</label>
                <div className="space-y-3">
-                  <input type="text" placeholder="Place" value={metadata.submissionPlace} onChange={e => setMetadata({...metadata, submissionPlace: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
-                  <input type="text" placeholder="Date" value={metadata.submissionDate} onChange={e => setMetadata({...metadata, submissionDate: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
+                  <input type="text" placeholder="Place" value={metadata.submissionPlace || ''} onChange={e => setMetadata({...metadata, submissionPlace: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
+                  <input type="text" placeholder="Date" value={metadata.submissionDate || ''} onChange={e => setMetadata({...metadata, submissionDate: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all animate-fade-in" />
                </div>
             </section>
           </div>
@@ -3730,9 +3742,34 @@ const App: React.FC = () => {
                   <div className="w-full bg-white/10 p-4 rounded-xl border border-white/20 text-left mt-4">
                     {webSyncUser ? (
                       <div className="space-y-3">
-                        <div>
-                          <span className="block text-[8px] text-blue-200 font-extrabold uppercase tracking-wider">CONNECTED TO:</span>
-                          <span className="block text-xs font-black tracking-wide truncate max-w-[280px] text-white">{webSyncUser.email}</span>
+                        <div className="space-y-2.5">
+                          <div>
+                            <span className="block text-[8px] text-blue-200 font-extrabold uppercase tracking-wider">CONNECTED TO:</span>
+                            <span className="block text-xs font-black tracking-wide truncate max-w-[280px] text-white">{webSyncUser.email}</span>
+                          </div>
+                          
+                          <div className="bg-white/10 p-2.5 rounded-xl border border-white/10 text-left">
+                            <span className="block text-[8px] text-blue-200 font-extrabold uppercase tracking-wider">☁️ LAST CLOUD BACKUP TIME:</span>
+                            <span className="block text-xs font-black text-emerald-300 tracking-wide mt-0.5">
+                              {webSyncUpdatedAt ? new Date(webSyncUpdatedAt).toLocaleString(undefined, {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit'
+                              }) : 'Never / No backup saved yet'}
+                            </span>
+                            {activeCloudPayload && (
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreFromHistory({ payload: activeCloudPayload, updatedAt: webSyncUpdatedAt || Date.now() })}
+                                className="mt-2 bg-emerald-500 hover:bg-emerald-400 text-white px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-wider border-0 shadow-sm transition-all cursor-pointer font-sans"
+                              >
+                                📥 Restore Active Backup
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="flex gap-2 justify-start">
                           <button
@@ -3754,6 +3791,48 @@ const App: React.FC = () => {
                         <span className="block text-[8px] text-emerald-200 font-extrabold uppercase tracking-wider">
                           ✓ Autosave is active
                         </span>
+
+                        {webSyncBackups && webSyncBackups.length > 0 && (
+                          <div className="mt-4 pt-4 border-t border-white/15 space-y-2">
+                            <span className="block text-[8px] text-blue-200 font-extrabold uppercase tracking-wider">
+                              ☁️ ROLLBACK HISTORY (Last {webSyncBackups.length} saves)
+                            </span>
+                            <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                              {webSyncBackups.map((backup, bIdx) => {
+                                const backupTime = new Date(backup.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                const backupDate = new Date(backup.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
+                                
+                                // Parse counts safely
+                                let actCount = 0;
+                                let movCount = 0;
+                                try {
+                                  const actRaw = backup.payload?.diary_activities || backup.payload?.['diary_profile_Muthvel R_activities'];
+                                  if (actRaw) actCount = JSON.parse(actRaw).length;
+                                  const movRaw = backup.payload?.diary_movements || backup.payload?.['diary_profile_Muthvel R_movements'];
+                                  if (movRaw) movCount = JSON.parse(movRaw).length;
+                                } catch (_) {}
+                                  
+                                return (
+                                  <div key={bIdx} className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-2 rounded-lg text-[10px] transition-all">
+                                    <div className="text-left">
+                                      <span className="block font-black text-white">{backupDate} @ {backupTime}</span>
+                                      <span className="block text-[8px] text-blue-100/80">
+                                        {actCount} entries • {movCount} transits
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRestoreFromHistory(backup)}
+                                      className="bg-white/20 hover:bg-white text-white hover:text-blue-700 px-2 py-1 rounded text-[8px] font-black uppercase tracking-wider border-0 shadow-sm transition-all cursor-pointer font-sans"
+                                    >
+                                      Restore
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2 flex flex-col text-left">
@@ -3832,7 +3911,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select
-                      value={metadata.month}
+                      value={metadata.month ?? new Date().getMonth()}
                       onChange={e => { setMetadata({...metadata, month: parseInt(e.target.value)}); setSelectedDateIdx(0); }}
                       className="p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer"
                     >
@@ -3844,7 +3923,7 @@ const App: React.FC = () => {
                     </select>
                     <input
                       type="number"
-                      value={metadata.year}
+                      value={metadata.year ?? new Date().getFullYear()}
                       onChange={e => { setMetadata({...metadata, year: parseInt(e.target.value)}); setSelectedDateIdx(0); }}
                       className="p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none text-center"
                     />
@@ -5406,16 +5485,6 @@ const App: React.FC = () => {
               <button
                 id="confirm-clear-btn"
                 onClick={() => {
-                  try {
-                    const keyMeta = activeProfile === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${activeProfile}_metadata`;
-                    const keyActivities = activeProfile === "Karikalvalavan R" ? "diary_activities" : `diary_profile_${activeProfile}_activities`;
-                    const keyMovements = activeProfile === "Karikalvalavan R" ? "diary_movements" : `diary_profile_${activeProfile}_movements`;
-                    localStorage.removeItem(keyMeta);
-                    localStorage.removeItem(keyActivities);
-                    localStorage.removeItem(keyMovements);
-                  } catch (e) {
-                    console.error("Failed to clear localStorage keys", e);
-                  }
                   const today = new Date();
                   const currentDay = today.getDate();
                   const currentMonth = today.getMonth();
@@ -5438,6 +5507,20 @@ const App: React.FC = () => {
                     dName = activeProfile;
                   }
 
+                  // 1. Get current preserved email if any
+                  const emailKey = activeProfile === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${activeProfile}_metadata`;
+                  const savedMeta = localStorage.getItem(emailKey);
+                  let preservedEmail = '';
+                  if (savedMeta) {
+                    try {
+                      preservedEmail = JSON.parse(savedMeta).scrEmailRecipient || '';
+                    } catch {}
+                  }
+
+                  // 2. Purge keys using helper (keeps the profile, preserves email)
+                  purgeKeysForProfile(activeProfile, true);
+
+                  // 3. Update React states
                   setMetadata({
                     name: dName,
                     designation: dDesig,
@@ -5447,12 +5530,20 @@ const App: React.FC = () => {
                     month: currentMonth,
                     year: currentYear,
                     fortnight: currentFortnight,
+                    scrEmailRecipient: preservedEmail
                   });
                   setActivities([]);
                   setMovements([]);
                   setSelectedDateIdx(0);
                   setShowClearConfirm(false);
-                  window.location.reload();
+
+                  // 4. Force immediate Cloud Web Sync to write empty states, then reload
+                  syncWorkspaceToWebStorage().then(() => {
+                    window.location.reload();
+                  }).catch(() => {
+                    // Fallback reload anyway in case of network issue
+                    window.location.reload();
+                  });
                 }}
                 className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black text-sm rounded-xl transition-all shadow-lg hover:shadow-rose-100 cursor-pointer text-center"
               >
@@ -5650,73 +5741,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* LOCKED PROFILE SWITCH MODAL */}
-      {lockedProfilePending && (
-        <div id="locked-profile-switch-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl space-y-6 text-center animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="mx-auto w-16 h-16 bg-blue-500/10 text-blue-400 rounded-3xl flex items-center justify-center border border-blue-500/20">
-              <Lock size={28} className="animate-pulse" />
-            </div>
-            
-            <div className="space-y-1">
-              <h3 className="text-lg font-black text-white uppercase tracking-tight">Unlock Profile</h3>
-              <p className="text-xs text-slate-400 font-semibold">
-                Profile <span className="text-slate-200 font-extrabold">"{lockedProfilePending}"</span> is secure. Enter passkey to load.
-              </p>
-            </div>
 
-            <form onSubmit={handlePendingUnlockSubmit} className="space-y-4 text-left">
-              <div>
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5 block">Passkey PIN</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••"
-                  maxLength={20}
-                  value={profileUnlockInput}
-                  onChange={(e) => setProfileUnlockInput(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-slate-950 border border-slate-800 rounded-2xl text-center text-white tracking-widest font-mono focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-lg transition-all"
-                  autoFocus
-                />
-                {profileUnlockError && (
-                  <p className="text-[10px] text-rose-400 font-bold mt-1.5 text-center">{profileUnlockError}</p>
-                )}
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLockedProfilePending(null);
-                    setProfileUnlockInput('');
-                    setProfileUnlockError('');
-                  }}
-                  className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-750 text-slate-300 font-black text-xs rounded-xl transition-all cursor-pointer border-0 animate-fade-in"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-lg border-0"
-                >
-                  🔓 Unlock
-                </button>
-              </div>
-            </form>
-
-            <div className="pt-4 border-t border-slate-800/60 flex flex-col gap-2.5">
-              <button
-                type="button"
-                disabled={recoverySending}
-                onClick={() => handleForgotPasskey(lockedProfilePending)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-bold tracking-wide transition-all bg-transparent border-0 cursor-pointer disabled:opacity-50"
-              >
-                {recoverySending ? "Sending Email..." : "🔑 Forgot Passkey? Recovery via SCR Email"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* SCR EMAIL SETUP MODAL */}
       {emailSetupPendingProfile && (
@@ -5804,104 +5829,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* PASSKEY SETUP / CHANGE MODAL */}
-      {passkeySetupPendingProfile && (
-        <div id="profile-passkey-setup-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl border border-slate-100 space-y-5 relative animate-fade-in" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-4 text-left">
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">
-                <Lock size={24} />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-slate-800 tracking-tight">
-                  {localStorage.getItem(`diary_profile_${passkeySetupPendingProfile}_passkey`) ? 'Change Passkey' : 'Secure with Passkey'}
-                </h3>
-                <p className="text-[10px] font-black uppercase text-blue-600 tracking-widest mt-0.5">Profile Security Configuration</p>
-              </div>
-            </div>
 
-            <p className="text-[11px] text-slate-500 font-semibold leading-relaxed text-left">
-              {localStorage.getItem(`diary_profile_${passkeySetupPendingProfile}_passkey`) 
-                ? `Enter your old passkey followed by your new security PIN to change passkey for profile "${passkeySetupPendingProfile}".`
-                : `To secure profile "${passkeySetupPendingProfile}", please set a 4-digit or custom passcode PIN. This secures your work entries, custom office databases, and configuration settings.`}
-            </p>
-
-            <form onSubmit={handlePasskeySetupSubmit} className="space-y-4 text-left">
-              {passkeySetupError && (
-                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-[11px] text-rose-600 font-bold animate-pulse">
-                  ⚠️ {passkeySetupError}
-                </div>
-              )}
-
-              <div className="space-y-3">
-                {localStorage.getItem(`diary_profile_${passkeySetupPendingProfile}_passkey`) && (
-                  <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Enter Old Passkey</label>
-                    <input
-                      required
-                      type="password"
-                      placeholder="Enter current PIN"
-                      value={passkeySetupOldInput}
-                      onChange={(e) => setPasskeySetupOldInput(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-blue-300 focus:bg-white font-mono tracking-widest"
-                    />
-                  </div>
-                )}
-                
-                <div>
-                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">New Passkey PIN</label>
-                  <input
-                    required
-                    type="password"
-                    placeholder="Enter new passkey"
-                    maxLength={20}
-                    value={passkeySetupNewInput}
-                    onChange={(e) => setPasskeySetupNewInput(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-blue-300 focus:bg-white font-mono tracking-widest"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Confirm New Passkey</label>
-                  <input
-                    required
-                    type="password"
-                    placeholder="Repeat new passkey"
-                    maxLength={20}
-                    value={passkeySetupConfirmInput}
-                    onChange={(e) => setPasskeySetupConfirmInput(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-blue-300 focus:bg-white font-mono tracking-widest"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                {localStorage.getItem(`diary_profile_${passkeySetupPendingProfile}_passkey`) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPasskeySetupPendingProfile(null);
-                      setPasskeySetupOldInput('');
-                      setPasskeySetupNewInput('');
-                      setPasskeySetupConfirmInput('');
-                      setPasskeySetupError('');
-                    }}
-                    className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs rounded-xl transition-all cursor-pointer border-0 animate-fade-in"
-                  >
-                    Cancel
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl transition-all cursor-pointer shadow-lg border-0"
-                >
-                  🔒 Save PIN
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
