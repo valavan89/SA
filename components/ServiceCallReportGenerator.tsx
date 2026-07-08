@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CloudDownload, Trash2, Mail, Share2 } from 'lucide-react';
-import { DiaryMetadata, ServiceCallReport, OfficeDatabaseEntry } from '../types';
+import { DiaryMetadata, ServiceCallReport, OfficeDatabaseEntry, ActivityEntry } from '../types';
+import { isMonthCompleted } from '../utils/dateUtils';
 import { 
   generateServiceCallReportDoc, 
   generateMultipleServiceCallReportsDoc,
@@ -237,6 +238,13 @@ interface ServiceCallReportGeneratorProps {
   setConfirmModal: (modal: any) => void;
   officesDb?: OfficeDatabaseEntry[];
   transportMode?: 'Bus' | 'Bike' | 'Train' | 'Auto';
+  activities?: ActivityEntry[];
+  showAllMonths?: boolean;
+  setShowAllMonths?: (val: boolean) => void;
+  selectedHistoricalMonth?: string;
+  setSelectedHistoricalMonth?: (val: string) => void;
+  historicalMonthsList?: string[];
+  formatMMYYYY?: (val: string) => string;
 }
 
 export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProps> = ({
@@ -249,6 +257,13 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   setConfirmModal,
   officesDb = [],
   transportMode = 'Bus',
+  activities = [],
+  showAllMonths = false,
+  setShowAllMonths,
+  selectedHistoricalMonth = '',
+  setSelectedHistoricalMonth,
+  historicalMonthsList = [],
+  formatMMYYYY = (val) => val,
 }) => {
   const [editingCall, setEditingCall] = useState<{
     officeAttended: string;
@@ -287,6 +302,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const pad = (num: number) => String(num).padStart(2, '0');
     return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
   });
+  const [isDateExplicitlySelected, setIsDateExplicitlySelected] = useState(false);
   const [selectedOfficeWise, setSelectedOfficeWise] = useState<string>('');
   const [viewingScDraft, setViewingScDraft] = useState<ServiceCallReport | null>(null);
 
@@ -557,9 +573,51 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     }
   };
 
-  const filteredCalls = draftFilterDate
-    ? serviceCalls.filter(sc => sc.date === yyyymmddToDdmmyyyy(draftFilterDate))
-    : [];
+  const filteredCalls = React.useMemo(() => {
+    const currentMonthStr = String(metadata.month + 1).padStart(2, '0');
+    const currentYearStr = String(metadata.year);
+
+    return serviceCalls.filter(sc => {
+      if (!sc || !sc.date) return false;
+      const parts = sc.date.split('.');
+      if (parts.length !== 3) return false;
+      const scYear = parseInt(parts[2], 10);
+      const scMonth = parseInt(parts[1], 10) - 1; // 0-indexed
+
+      // 1. If showAllMonths is active, we filter by selectedHistoricalMonth
+      if (showAllMonths) {
+        const scMy = `${parts[1]}.${parts[2]}`;
+        if (scMy !== selectedHistoricalMonth) return false;
+
+        if (draftFilterDate) {
+          const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
+          return sc.date === selectedDateDdmmyyyy;
+        }
+        return true;
+      }
+
+      // 2. Otherwise, we ONLY allow service calls from the current metadata month & year
+      const isCurrentMonth = parts[1] === currentMonthStr && parts[2] === currentYearStr;
+      if (!isCurrentMonth) return false;
+
+      // 3. For current month, check if it's a completed month
+      const scMonthCompleted = isMonthCompleted(scYear, scMonth, activities);
+
+      if (scMonthCompleted) {
+        if (draftFilterDate && isDateExplicitlySelected) {
+          const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
+          return sc.date === selectedDateDdmmyyyy;
+        }
+        return false;
+      } else {
+        if (draftFilterDate) {
+          const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
+          return sc.date === selectedDateDdmmyyyy;
+        }
+        return true;
+      }
+    });
+  }, [serviceCalls, draftFilterDate, isDateExplicitlySelected, activities, metadata.month, metadata.year, showAllMonths, selectedHistoricalMonth]);
 
   // Sync / Reset on profile change to prevent mixing draft IDs
   useEffect(() => {
@@ -569,6 +627,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const todayStr = `${pad(today.getDate())}.${pad(today.getMonth() + 1)}.${today.getFullYear()}`;
     const todayYmd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     setDraftFilterDate(todayYmd);
+    setIsDateExplicitlySelected(false);
     setEditingCall({
       officeAttended: '',
       callGivenBy: 'SPM',
@@ -1157,40 +1216,70 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
             </div>
 
             {/* Date Picker Filter */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200/60 text-left">
+            <div className="bg-white p-3 rounded-xl border border-slate-200/60 text-left space-y-2">
               <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1 block">Filter Drafts by Date</label>
               <div className="flex items-center gap-2">
                 <input
                   type="date"
                   value={draftFilterDate}
-                  onChange={(e) => setDraftFilterDate(e.target.value)}
+                  onChange={(e) => {
+                    setDraftFilterDate(e.target.value);
+                    setIsDateExplicitlySelected(true);
+                  }}
                   className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 cursor-pointer"
                 />
                 {draftFilterDate && (
                   <button
                     type="button"
-                    onClick={() => setDraftFilterDate('')}
+                    onClick={() => {
+                      setDraftFilterDate('');
+                      setIsDateExplicitlySelected(false);
+                    }}
                     className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-lg text-[10px] font-bold uppercase tracking-wider cursor-pointer border-0"
                   >
                     Clear
                   </button>
                 )}
               </div>
+
+              {setShowAllMonths && (
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllMonths(!showAllMonths)}
+                    className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 cursor-pointer border ${
+                      showAllMonths
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
+                        : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>📂 {showAllMonths ? 'Show Current Month Only' : 'Get Previous Month Details'}</span>
+                  </button>
+                  {showAllMonths && setSelectedHistoricalMonth && (
+                    <select
+                      value={selectedHistoricalMonth}
+                      onChange={(e) => setSelectedHistoricalMonth(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      {historicalMonthsList.map(mY => (
+                        <option key={mY} value={mY}>
+                          {formatMMYYYY(mY)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-              {!draftFilterDate ? (
+              {filteredCalls.length === 0 ? (
                 <div className="py-8 px-4 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-2 bg-slate-50/50">
-                  <p className="text-xs text-slate-500 font-bold">Please Select a Date</p>
-                  <p className="text-[10px] text-slate-400 font-medium">
-                    Saved drafts will be displayed after selecting a date.
-                  </p>
-                </div>
-              ) : filteredCalls.length === 0 ? (
-                <div className="py-8 px-4 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-2">
                   <p className="text-xs text-slate-400 font-bold">No drafts found</p>
                   <p className="text-[10px] text-slate-400">
-                    No saved drafts for this selected date ({yyyymmddToDdmmyyyy(draftFilterDate)}).
+                    {draftFilterDate 
+                      ? `No saved drafts for this selected date (${yyyymmddToDdmmyyyy(draftFilterDate)}).`
+                      : "No active drafts found for uncompleted months."}
                   </p>
                 </div>
               ) : (

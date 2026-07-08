@@ -57,7 +57,7 @@ function saveSyncStore() {
 // API Routes
 // API Routes
 const ACCOUNTS_FILE = path.join(process.cwd(), "web-sync-accounts.json");
-let accountsStore: Record<string, { email: string; passcode: string; payload: any; updatedAt: number; history?: Array<{ payload: any; updatedAt: number }> }> = {};
+let accountsStore: Record<string, { email: string; passcode: string; payload: any; updatedAt: number; device?: string; history?: Array<{ payload: any; updatedAt: number; device?: string }> }> = {};
 
 // Load previous accounts store if exists
 try {
@@ -221,6 +221,7 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
     }
 
     const existingAccount = accountsStore[email];
+    const clientDevice = req.body.device || "PC";
     if (existingAccount) {
       // Login flow: verify password
       if (existingAccount.passcode !== cleanPasscode) {
@@ -228,6 +229,9 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
           success: false, 
           message: "Incorrect passcode for this account. Each Username or Email has a secured passcode. Please try again or use a different unique ID." 
         });
+      }
+      if (!existingAccount.device) {
+        existingAccount.device = clientDevice;
       }
       return res.json({ 
         success: true, 
@@ -244,6 +248,7 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
         passcode: cleanPasscode,
         payload: null,
         updatedAt: Date.now(),
+        device: clientDevice,
         history: []
       };
       saveAccountsStore();
@@ -266,13 +271,14 @@ app.post("/api/web-storage/register-or-login", (req, res) => {
 // Web Storage Synchronous Backup Upload
 app.post("/api/web-storage/save", (req, res) => {
   try {
-    const { email: rawEmail, passcode, payload } = req.body;
+    const { email: rawEmail, passcode, payload, device } = req.body;
     if (!rawEmail || !passcode || !payload) {
       return res.status(400).json({ success: false, message: "Missing required sync upload fields." });
     }
 
     const email = rawEmail.toLowerCase().trim();
     const cleanPasscode = String(passcode).trim();
+    const currentDevice = device || "PC";
 
     const account = accountsStore[email];
     if (account) {
@@ -290,18 +296,29 @@ app.post("/api/web-storage/save", (req, res) => {
         // Only backup if the payload changed
         const isIdentical = JSON.stringify(account.payload) === JSON.stringify(payload);
         if (!isIdentical) {
-          account.history.unshift({
-            payload: account.payload,
-            updatedAt: account.updatedAt
-          });
-          if (account.history.length > 5) {
-            account.history = account.history.slice(0, 5);
+          const prevDevice = account.device || "PC";
+          const timeSinceLastSave = Date.now() - account.updatedAt;
+
+          // Conditions to save to rollback history:
+          // 1. Device changed (e.g., PC to Mobile, or Mobile to PC) - always backup to avoid losing PC/Mobile state
+          // 2. OR it's been at least 5 minutes (300,000 ms) since the last save on the SAME device.
+          // This avoids spamming 5 history slots in a short 10-minute session.
+          if (prevDevice !== currentDevice || timeSinceLastSave >= 5 * 60 * 1000) {
+            account.history.unshift({
+              payload: account.payload,
+              updatedAt: account.updatedAt,
+              device: prevDevice
+            });
+            if (account.history.length > 5) {
+              account.history = account.history.slice(0, 5);
+            }
           }
         }
       }
       
       account.payload = payload;
       account.updatedAt = Date.now();
+      account.device = currentDevice;
     } else {
       // If server file cleared but user is sending, auto-recreate
       accountsStore[email] = {
@@ -309,6 +326,7 @@ app.post("/api/web-storage/save", (req, res) => {
         passcode: cleanPasscode,
         payload,
         updatedAt: Date.now(),
+        device: currentDevice,
         history: []
       };
     }

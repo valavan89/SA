@@ -21,11 +21,13 @@ import {
   Copy,
   Cloud,
   CloudDownload,
-  Lock
+  Lock,
+  CalendarRange,
+  Filter
 } from 'lucide-react';
 import { DiaryMetadata, ActivityEntry, MovementEntry, OfficeVisit, OfficeDatabaseEntry, InterOfficeRouteEntry, ServiceCallReport } from './types';
-import { getFortnightDays, formatDate, formatDay, to24hDot } from './utils/dateUtils';
-import { generateWordDoc, generateTACalculationsDoc, generateServiceCallReportDoc } from './services/docGenerator';
+import { getFortnightDays, formatDate, formatDay, to24hDot, isMonthCompleted } from './utils/dateUtils';
+import { generateWordDoc, generateTACalculationsDoc, generateServiceCallReportDoc, generateTABillDoc } from './services/docGenerator';
 import { ServiceCallReportGenerator } from './components/ServiceCallReportGenerator';
 import { googleSignIn } from './services/firebaseAuth';
 import { sendEmailWithAttachments } from './services/gmailSender';
@@ -67,6 +69,18 @@ const getProfileAttachedOffice = (profileName: string): string => {
   if (norm === "Muthvel R") return "Neyveli 3 S.O";
   if (norm === "Sivaraj S") return "Annamalainagar SO";
   return "";
+};
+
+const getDeviceType = (): "Mobile" | "PC" => {
+  if (typeof window === 'undefined' || !window.navigator) return "PC";
+  const ua = window.navigator.userAgent;
+  if (/tablet|ipad|playbook|silk/i.test(ua)) {
+    return "Mobile";
+  }
+  if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Opera Mini/i.test(ua)) {
+    return "Mobile";
+  }
+  return "PC";
 };
 
 const CORRECTIONS: Record<string, string> = {
@@ -738,7 +752,24 @@ const App: React.FC = () => {
     onCancel?: () => void;
     accentColor?: 'blue' | 'rose' | 'emerald';
   } | null>(null);
+  const [showTABillModal, setShowTABillModal] = useState(false);
+  const [taBillPay, setTaBillPay] = useState('38100+others');
+  const [taBillAdvance, setTaBillAdvance] = useState('');
+  const [taBillMonth, setTaBillMonth] = useState<number>(0);
+  const [taBillYear, setTaBillYear] = useState<number>(2026);
+
+  const [showExportDiaryModal, setShowExportDiaryModal] = useState(false);
+  const [exportDiaryMonth, setExportDiaryMonth] = useState<number>(0);
+  const [exportDiaryYear, setExportDiaryYear] = useState<number>(2026);
+  const [exportDiaryFortnight, setExportDiaryFortnight] = useState<'first' | 'second'>('first');
+
+  const [showExportTAModal, setShowExportTAModal] = useState(false);
+  const [exportTAMonth, setExportTAMonth] = useState<number>(0);
+  const [exportTAYear, setExportTAYear] = useState<number>(2026);
+
   const [activeTab, setActiveTab] = useState<'profile' | 'scr' | 'entry' | 'summary' | 'movements' | 'database'>('entry');
+  const [showAllMonths, setShowAllMonths] = useState(false);
+  const [selectedHistoricalMonth, setSelectedHistoricalMonth] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [syncTextInput, setSyncTextInput] = useState('');
   const [syncPinInput, setSyncPinInput] = useState('');
@@ -761,7 +792,7 @@ const App: React.FC = () => {
   const [webSyncStatus, setWebSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'loading'>('idle');
   const [webSyncErrorMessage, setWebSyncErrorMessage] = useState('');
   const [isInitialSyncCompleted, setIsInitialSyncCompleted] = useState(false);
-  const [webSyncBackups, setWebSyncBackups] = useState<Array<{ payload: any; updatedAt: number }>>([]);
+  const [webSyncBackups, setWebSyncBackups] = useState<Array<{ payload: any; updatedAt: number; device?: string }>>([]);
   const [webSyncUpdatedAt, setWebSyncUpdatedAt] = useState<number | null>(() => {
     const saved = localStorage.getItem('diary_websync_updated_at');
     return saved ? parseInt(saved, 10) : null;
@@ -807,13 +838,22 @@ const App: React.FC = () => {
     return payload;
   };
 
-  const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, delay = 1500): Promise<Response> => {
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3, delay = 1500): Promise<Response> => {
     try {
       const response = await fetch(url, options);
       if (!response.ok && response.status >= 500 && retries > 0) {
         await new Promise(resolve => setTimeout(resolve, delay));
         return fetchWithRetry(url, options, retries - 1, delay * 1.5);
       }
+      
+      // If it's an API route and we get HTML (e.g., due to offline fallback, SPA fallback or service worker)
+      if (url.startsWith('/api/')) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('text/html')) {
+          throw new Error('Server returned HTML instead of JSON. Please refresh the page, clear your service worker cache, or check your internet connection.');
+        }
+      }
+      
       return response;
     } catch (error) {
       if (retries > 0) {
@@ -837,7 +877,8 @@ const App: React.FC = () => {
         body: JSON.stringify({
           email: userToSync.email,
           passcode: userToSync.passcode,
-          payload
+          payload,
+          device: getDeviceType()
         })
       });
 
@@ -889,7 +930,8 @@ const App: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: webSyncUser.email,
-            passcode: webSyncUser.passcode
+            passcode: webSyncUser.passcode,
+            device: getDeviceType()
           })
         });
 
@@ -1153,6 +1195,25 @@ const App: React.FC = () => {
     return [];
   });
 
+  const [confirmedScrDays, setConfirmedScrDays] = useState<Record<string, boolean>>(() => {
+    const rawProf = localStorage.getItem('diary_active_profile') || "Karikalvalavan R";
+    const actProf = rawProf === "Default Profile" ? "Karikalvalavan R" : rawProf;
+    const key = actProf === "Karikalvalavan R" ? "diary_confirmed_scr_days" : `diary_profile_${actProf}_confirmed_scr_days`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    if (loadedProfileRef.current !== activeProfile) return;
+    const key = activeProfile === "Karikalvalavan R" ? "diary_confirmed_scr_days" : `diary_profile_${activeProfile}_confirmed_scr_days`;
+    localStorage.setItem(key, JSON.stringify(confirmedScrDays));
+  }, [confirmedScrDays, activeProfile]);
+
   useEffect(() => {
     if (loadedProfileRef.current !== activeProfile) return;
     const key = activeProfile === "Karikalvalavan R" ? "diary_service_calls" : `diary_profile_${activeProfile}_service_calls`;
@@ -1195,6 +1256,142 @@ const App: React.FC = () => {
     const key = activeProfile === "Karikalvalavan R" ? "diary_offices_db" : `diary_profile_${activeProfile}_offices_db`;
     localStorage.setItem(key, JSON.stringify(officesDb));
   }, [officesDb, activeProfile]);
+
+  const currentMonthStr = useMemo(() => String(metadata.month + 1).padStart(2, '0'), [metadata.month]);
+  const currentYearStr = useMemo(() => String(metadata.year), [metadata.year]);
+
+  const currentMonthServiceCalls = useMemo(() => {
+    return serviceCalls.filter(sc => {
+      if (!sc || !sc.date) return false;
+      const parts = sc.date.split('.');
+      return parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr;
+    });
+  }, [serviceCalls, currentMonthStr, currentYearStr]);
+
+  const currentMonthActivities = useMemo(() => {
+    return activities.filter(act => {
+      if (!act || !act.date) return false;
+      const parts = act.date.split('.');
+      return parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr;
+    });
+  }, [activities, currentMonthStr, currentYearStr]);
+
+  const currentMonthMovements = useMemo(() => {
+    return movements.filter(m => {
+      if (!m || !m.date) return false;
+      const parts = m.date.split('.');
+      return parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr;
+    });
+  }, [movements, currentMonthStr, currentYearStr]);
+
+  const currentMonthBikeKM = useMemo(() => {
+    return currentMonthMovements
+      .filter(m => (m.mode || '').toUpperCase() === 'BIKE')
+      .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+  }, [currentMonthMovements]);
+
+  const currentFortnightActivitiesCount = useMemo(() => {
+    const keys = new Set(availableDays.map(day => formatDate(day)));
+    return activities.filter(act => keys.has(act.date)).length;
+  }, [activities, availableDays]);
+
+  const currentFortnightMovements = useMemo(() => {
+    const keys = new Set(availableDays.map(day => formatDate(day)));
+    return movements.filter(m => keys.has(m.date));
+  }, [movements, availableDays]);
+
+  const currentFortnightKM = useMemo(() => {
+    return currentFortnightMovements.reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+  }, [currentFortnightMovements]);
+
+  const totalKM = useMemo(() => {
+    return movements.reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+  }, [movements]);
+
+  const formatMonthYear = (month: number, year: number) => {
+    const date = new Date(year, month, 1);
+    return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+  };
+
+  const formatMMYYYY = (mYStr: string) => {
+    if (!mYStr) return '';
+    const parts = mYStr.split('.');
+    if (parts.length !== 2) return mYStr;
+    const month = parseInt(parts[0], 10) - 1;
+    const year = parseInt(parts[1], 10);
+    const date = new Date(year, month, 1);
+    return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+  };
+
+  const historicalMonthsList = useMemo(() => {
+    const monthsSet = new Set<string>(); // "MM.YYYY"
+    const addDate = (dStr: string) => {
+      if (!dStr) return;
+      const parts = dStr.split('.');
+      if (parts.length === 3) {
+        const mY = `${parts[1]}.${parts[2]}`;
+        const curMy = `${String(metadata.month + 1).padStart(2, '0')}.${metadata.year}`;
+        if (mY !== curMy) {
+          monthsSet.add(mY);
+        }
+      }
+    };
+    activities.forEach(a => addDate(a.date));
+    serviceCalls.forEach(sc => addDate(sc.date));
+    movements.forEach(m => addDate(m.date));
+
+    // If empty, add immediately preceding month as fallback
+    if (monthsSet.size === 0) {
+      let prevMonth = metadata.month - 1;
+      let prevYear = metadata.year;
+      if (prevMonth < 0) {
+        prevMonth = 11;
+        prevYear -= 1;
+      }
+      monthsSet.add(`${String(prevMonth + 1).padStart(2, '0')}.${prevYear}`);
+    }
+
+    return Array.from(monthsSet).sort((a, b) => {
+      const [mA, yA] = a.split('.').map(Number);
+      const [mB, yB] = b.split('.').map(Number);
+      if (yA !== yB) return yB - yA;
+      return mB - mA;
+    });
+  }, [activities, serviceCalls, movements, metadata.month, metadata.year]);
+
+  useEffect(() => {
+    if (historicalMonthsList.length > 0 && !historicalMonthsList.includes(selectedHistoricalMonth)) {
+      setSelectedHistoricalMonth(historicalMonthsList[0]);
+    }
+  }, [historicalMonthsList, selectedHistoricalMonth]);
+
+  const historicalMonthServiceCallsCount = useMemo(() => {
+    return serviceCalls.filter(sc => {
+      if (!sc || !sc.date) return false;
+      const parts = sc.date.split('.');
+      return parts.length === 3 && `${parts[1]}.${parts[2]}` === selectedHistoricalMonth;
+    }).length;
+  }, [serviceCalls, selectedHistoricalMonth]);
+
+  const historicalMonthActivitiesCount = useMemo(() => {
+    return activities.filter(act => {
+      if (!act || !act.date) return false;
+      const parts = act.date.split('.');
+      return parts.length === 3 && `${parts[1]}.${parts[2]}` === selectedHistoricalMonth;
+    }).length;
+  }, [activities, selectedHistoricalMonth]);
+
+  const historicalMonthMovements = useMemo(() => {
+    return movements.filter(m => {
+      if (!m || !m.date) return false;
+      const parts = m.date.split('.');
+      return parts.length === 3 && `${parts[1]}.${parts[2]}` === selectedHistoricalMonth;
+    });
+  }, [movements, selectedHistoricalMonth]);
+
+  const historicalMonthKM = useMemo(() => {
+    return historicalMonthMovements.reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+  }, [historicalMonthMovements]);
 
   const uniqueOfficesList = useMemo(() => {
     const baseList = getProfileBaseOffices(activeProfile);
@@ -1452,6 +1649,9 @@ const App: React.FC = () => {
     const keyServiceCalls = oldProf === "Karikalvalavan R" ? "diary_service_calls" : `diary_profile_${oldProf}_service_calls`;
     localStorage.setItem(keyServiceCalls, JSON.stringify(serviceCalls));
 
+    const keyConfirmedScrDays = oldProf === "Karikalvalavan R" ? "diary_confirmed_scr_days" : `diary_profile_${oldProf}_confirmed_scr_days`;
+    localStorage.setItem(keyConfirmedScrDays, JSON.stringify(confirmedScrDays));
+
     // Update loadedProfileRef BEFORE setting activeProfile to let effects run again for new profile
     loadedProfileRef.current = newProfileName;
     setActiveProfile(newProfileName);
@@ -1572,6 +1772,10 @@ const App: React.FC = () => {
     // Service Calls
     const savedCalls = getNewVal('service_calls');
     setServiceCalls(savedCalls ? JSON.parse(savedCalls) : []);
+
+    // Confirmed SCR Days
+    const savedConfirmedScr = getNewVal('confirmed_scr_days');
+    setConfirmedScrDays(savedConfirmedScr ? JSON.parse(savedConfirmedScr) : {});
   };
 
   const purgeKeysForProfile = (profileName: string, keepProfile: boolean = false) => {
@@ -1913,7 +2117,11 @@ const App: React.FC = () => {
     const dStr = formatDate(day);
     const matchingList = serviceCalls.filter(sc => sc.date === dStr);
     
-    if (matchingList.length > 0 && activeTab === 'entry') {
+    const activeYear = day.getFullYear();
+    const activeMonth = day.getMonth();
+    const monthIsCompleted = isMonthCompleted(activeYear, activeMonth, activities);
+
+    if (matchingList.length > 0 && activeTab === 'entry' && !monthIsCompleted && !confirmedScrDays[dStr]) {
       const promptKey = matchingList.map(m => m.id).sort().join('_');
       if (promptKey !== lastPromptedScrId) {
         const allAlreadyFilled = matchingList.every(matching => 
@@ -1934,6 +2142,7 @@ const App: React.FC = () => {
             onConfirm: () => {
               handleImportSCRs(matchingList);
               setLastPromptedScrId(promptKey);
+              setConfirmedScrDays(prev => ({ ...prev, [dStr]: true }));
               setConfirmModal(null);
             },
             onCancel: () => {
@@ -1944,7 +2153,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [selectedDateIdx, serviceCalls, lastPromptedScrId, activeTab, visits]);
+  }, [selectedDateIdx, serviceCalls, lastPromptedScrId, activeTab, visits, activities, confirmedScrDays]);
 
   const [dbError, setDbError] = useState('');
   const [newOfficeFromOffice, setNewOfficeFromOffice] = useState('');
@@ -2803,21 +3012,29 @@ const App: React.FC = () => {
     setMovements(prev => prev.filter(m => m.date !== date));
   };
 
-  const handleExport = () => {
-    const fortnightKeys = new Set(availableDays.map(day => formatDate(day)));
+  const handleExport = (exportMonth: number, exportYear: number, exportFortnight: 'first' | 'second') => {
+    const exportDays = getFortnightDays(exportYear, exportMonth, exportFortnight);
+    const fortnightKeys = new Set(exportDays.map(day => formatDate(day)));
     const fortnightActivities = activities.filter(a => fortnightKeys.has(a.date));
     const fortnightMovements = movements.filter(m => fortnightKeys.has(m.date));
 
+    const tempMetadata = {
+      ...metadata,
+      month: exportMonth,
+      year: exportYear,
+      fortnight: exportFortnight
+    };
+
     const checkPadding = () => {
-      if (fortnightActivities.length < availableDays.length) {
+      if (fortnightActivities.length < exportDays.length) {
         setConfirmModal({
           title: "Missing Days in Fortnight",
-          message: `You only have ${fortnightActivities.length} days out of ${availableDays.length} filled for this fortnight. Would you like to automatically fill the remaining days with the default 'At ${attachedOffice}'?`,
+          message: `You only have ${fortnightActivities.length} days out of ${exportDays.length} filled for this fortnight. Would you like to automatically fill the remaining days with the default 'At ${attachedOffice}'?`,
           confirmText: "Yes, Auto-fill & Export Diary",
           cancelText: "No, Export Diary as is",
           accentColor: "blue",
           onConfirm: () => {
-            const paddingActivities = availableDays.filter(day => !fortnightActivities.some(a => a.date === formatDate(day))).map(day => {
+            const paddingActivities = exportDays.filter(day => !fortnightActivities.some(a => a.date === formatDate(day))).map(day => {
               const dStr = formatDate(day);
               const dNm = formatDay(day);
               return {
@@ -2829,30 +3046,36 @@ const App: React.FC = () => {
                 details: computeDetails([{ id: 'pad', officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }], dStr, dNm, 'Bus')
               };
             });
-            generateWordDoc(metadata, [...fortnightActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), fortnightMovements);
+            generateWordDoc(tempMetadata, [...fortnightActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), fortnightMovements);
             setConfirmModal(null);
           },
           onCancel: () => {
-            generateWordDoc(metadata, fortnightActivities, fortnightMovements);
+            generateWordDoc(tempMetadata, fortnightActivities, fortnightMovements);
             setConfirmModal(null);
           }
         });
       } else {
-        generateWordDoc(metadata, fortnightActivities, fortnightMovements);
+        generateWordDoc(tempMetadata, fortnightActivities, fortnightMovements);
       }
     };
 
     checkPadding();
   };
 
-  const handleExportTA = () => {
-    const firstFort = getFortnightDays(metadata.year, metadata.month, 'first');
-    const secondFort = getFortnightDays(metadata.year, metadata.month, 'second');
+  const handleExportTA = (exportMonth: number, exportYear: number) => {
+    const firstFort = getFortnightDays(exportYear, exportMonth, 'first');
+    const secondFort = getFortnightDays(exportYear, exportMonth, 'second');
     const fullMonthDays = [...firstFort, ...secondFort];
 
     const monthKeys = new Set(fullMonthDays.map(day => formatDate(day)));
     const monthActivities = activities.filter(a => monthKeys.has(a.date));
     const monthMovements = movements.filter(m => monthKeys.has(m.date));
+
+    const tempMetadata = {
+      ...metadata,
+      month: exportMonth,
+      year: exportYear
+    };
 
     const checkTAPadding = () => {
       if (monthActivities.length < fullMonthDays.length) {
@@ -2875,20 +3098,26 @@ const App: React.FC = () => {
                 details: computeDetails([{ id: 'pad', officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }], dStr, dNm, 'Bus')
               };
             });
-            generateTACalculationsDoc(metadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements, serviceCalls);
+            generateTACalculationsDoc(tempMetadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements, serviceCalls);
             setConfirmModal(null);
           },
           onCancel: () => {
-            generateTACalculationsDoc(metadata, monthActivities, monthMovements, serviceCalls);
+            generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls);
             setConfirmModal(null);
           }
         });
       } else {
-        generateTACalculationsDoc(metadata, monthActivities, monthMovements, serviceCalls);
+        generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls);
       }
     };
 
     checkTAPadding();
+  };
+
+  const handleExportTABill = () => {
+    setTaBillMonth(metadata.month);
+    setTaBillYear(metadata.year);
+    setShowTABillModal(true);
   };
 
   const handleWebSyncSubmit = async (e: React.FormEvent) => {
@@ -2905,7 +3134,8 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: loginEmail,
-          passcode: loginPasscode
+          passcode: loginPasscode,
+          device: getDeviceType()
         })
       });
 
@@ -3423,19 +3653,40 @@ const App: React.FC = () => {
             </button>
             <button 
               id="export-diary-btn"
-              onClick={handleExport} 
+              onClick={() => {
+                setExportDiaryMonth(metadata.month ?? new Date().getMonth());
+                setExportDiaryYear(metadata.year ?? new Date().getFullYear());
+                setExportDiaryFortnight(metadata.fortnight ?? 'first');
+                setShowExportDiaryModal(true);
+              }} 
               className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap"
             >
               <Download size={14} className="sm:w-[18px] sm:h-[18px]" /> 
-              <span>Export Diary</span>
+              <span>Dairy</span>
             </button>
             <button 
               id="export-ta-btn"
-              onClick={handleExportTA} 
+              onClick={() => {
+                setExportTAMonth(metadata.month ?? new Date().getMonth());
+                setExportTAYear(metadata.year ?? new Date().getFullYear());
+                setShowExportTAModal(true);
+              }} 
               className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap"
             >
               <FileText size={14} className="sm:w-[18px] sm:h-[18px]" /> 
               <span>TA Calculations</span>
+            </button>
+            <button 
+              id="export-ta-bill-btn"
+              onClick={() => {
+                setTaBillMonth(metadata.month ?? new Date().getMonth());
+                setTaBillYear(metadata.year ?? new Date().getFullYear());
+                setShowTABillModal(true);
+              }} 
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap shadow-amber-100/50"
+            >
+              <FileText size={14} className="sm:w-[18px] sm:h-[18px]" /> 
+              <span>TA Bill</span>
             </button>
           </div>
         </div>
@@ -3471,7 +3722,9 @@ const App: React.FC = () => {
             <div className="min-w-0">
               <span className="block text-xs font-black uppercase tracking-wide">2. SCR Generator</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
-                {serviceCalls.length} Drafts Saved
+                {showAllMonths 
+                  ? `${historicalMonthServiceCallsCount} Drafts (${selectedHistoricalMonth})` 
+                  : `${currentMonthServiceCalls.length} Drafts Saved`}
               </span>
             </div>
           </button>
@@ -3503,7 +3756,9 @@ const App: React.FC = () => {
             <div className="min-w-0">
               <span className="block text-xs font-black uppercase tracking-wide">4. Saved Summary</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
-                {activities.length} of {availableDays.length} Days filled
+                {showAllMonths 
+                  ? `${historicalMonthActivitiesCount} Days (${selectedHistoricalMonth})` 
+                  : `${currentFortnightActivitiesCount} of ${availableDays.length} Days filled`}
               </span>
             </div>
           </button>
@@ -3519,7 +3774,9 @@ const App: React.FC = () => {
             <div className="min-w-0">
               <span className="block text-xs font-black uppercase tracking-wide">5. Live Travel Log</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
-                {movements.length} rows • {movements.reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0).toFixed(0)} KM
+                {showAllMonths 
+                  ? `${historicalMonthMovements.length} rows • ${historicalMonthKM.toFixed(0)} KM (${selectedHistoricalMonth})` 
+                  : `${currentFortnightMovements.length} rows • ${currentFortnightKM.toFixed(0)} KM`}
               </span>
             </div>
           </button>
@@ -3815,7 +4072,16 @@ const App: React.FC = () => {
                                 return (
                                   <div key={bIdx} className="flex items-center justify-between bg-white/5 hover:bg-white/10 p-2 rounded-lg text-[10px] transition-all">
                                     <div className="text-left">
-                                      <span className="block font-black text-white">{backupDate} @ {backupTime}</span>
+                                      <span className="block font-black text-white">
+                                        {backupDate} @ {backupTime}
+                                        <span className={`ml-2 px-1.5 py-0.5 rounded text-[7px] font-black tracking-wider uppercase inline-block align-middle ${
+                                          (backup.device || "PC").toLowerCase() === "mobile" 
+                                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/20' 
+                                            : 'bg-sky-500/20 text-sky-300 border border-sky-500/20'
+                                        }`}>
+                                          {backup.device || "PC"}
+                                        </span>
+                                      </span>
                                       <span className="block text-[8px] text-blue-100/80">
                                         {actCount} entries • {movCount} transits
                                       </span>
@@ -3870,6 +4136,13 @@ const App: React.FC = () => {
           setConfirmModal={setConfirmModal}
           officesDb={officesDb}
           transportMode={transportMode}
+          activities={activities}
+          showAllMonths={showAllMonths}
+          setShowAllMonths={setShowAllMonths}
+          selectedHistoricalMonth={selectedHistoricalMonth}
+          setSelectedHistoricalMonth={setSelectedHistoricalMonth}
+          historicalMonthsList={historicalMonthsList}
+          formatMMYYYY={formatMMYYYY}
         />
       )}
 
@@ -4084,16 +4357,18 @@ const App: React.FC = () => {
                     </div>
                     <div className="mt-3 flex flex-col gap-1 px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-[11px]">
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-500">Total Bike Distance:</span>
+                        <span className="font-semibold text-slate-500">
+                          Bike Distance ({new Date(metadata.year, metadata.month).toLocaleString('default', { month: 'short' })}):
+                        </span>
                         <span className={`font-black ${
-                          movements.filter(m => (m.mode || '').toUpperCase() === 'BIKE').reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0) > 200 
+                          currentMonthBikeKM > 200 
                             ? 'text-rose-600 animate-pulse' 
                             : 'text-blue-600'
                         }`}>
-                          {movements.filter(m => (m.mode || '').toUpperCase() === 'BIKE').reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0).toFixed(1)} km
+                          {currentMonthBikeKM.toFixed(1)} km
                         </span>
                       </div>
-                      {movements.filter(m => (m.mode || '').toUpperCase() === 'BIKE').reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0) > 200 && (
+                      {currentMonthBikeKM > 200 && (
                         <div className="text-[9px] text-rose-600 font-extrabold text-right mt-1 animate-fade-in uppercase tracking-wider leading-none">
                           ⚠️ Exceeds 200 km limit
                         </div>
@@ -4109,6 +4384,11 @@ const App: React.FC = () => {
                    {(() => {
                      const activeDay = availableDays[selectedDateIdx];
                      if (!activeDay) return null;
+                     
+                     const activeYear = activeDay.getFullYear();
+                     const activeMonth = activeDay.getMonth();
+                     if (isMonthCompleted(activeYear, activeMonth, activities)) return null;
+
                      const dStr = formatDate(activeDay);
                      const matchingList = serviceCalls.filter(sc => sc.date === dStr);
                       const officesSorted = [...matchingList].sort((a, b) => timeToMinutes(a.timeIn) - timeToMinutes(b.timeIn));
@@ -4127,22 +4407,29 @@ const App: React.FC = () => {
                            <button
                              type="button"
                              onClick={() => {
-                               setConfirmModal({
-                                 title: `Import ${matchingList.length} SCR Details?`,
-                                 message: `Are you sure you want to overwrite your visits for ${dStr} with the Service Call Report(s) for "${officeNamesText}" in time sequence?`,
-                                 confirmText: "Yes, Overwrite & Fill All",
-                                 cancelText: "No, Keep current",
-                                 accentColor: "blue",
-                                 onConfirm: () => {
-                                   handleImportSCRs(matchingList);
-                                   setConfirmModal(null);
-                                 },
-                                 onCancel: () => setConfirmModal(null)
-                               });
+                               if (confirmedScrDays[dStr]) {
+                                 handleImportSCRs(matchingList);
+                               } else {
+                                 setConfirmModal({
+                                   title: `Import ${matchingList.length} SCR Details?`,
+                                   message: `Are you sure you want to overwrite your visits for ${dStr} with the Service Call Report(s) for "${officeNamesText}" in time sequence?`,
+                                   confirmText: "Yes, Overwrite & Fill All",
+                                   cancelText: "No, Keep current",
+                                   accentColor: "blue",
+                                   onConfirm: () => {
+                                     handleImportSCRs(matchingList);
+                                     setConfirmedScrDays(prev => ({ ...prev, [dStr]: true }));
+                                     setConfirmModal(null);
+                                   },
+                                   onCancel: () => setConfirmModal(null)
+                                 });
+                               }
                              }}
-                             className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer border-0"
+                             className={`mt-2 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all shadow-sm active:scale-95 cursor-pointer border-0 ${
+                               confirmedScrDays[dStr] ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                             }`}
                            >
-                             ⚡ Confirm & Auto-Fill All
+                             {confirmedScrDays[dStr] ? "✓ Already Confirmed (Click to Re-Fill)" : "⚡ Confirm & Auto-Fill All"}
                            </button>
                          </div>
                        </div>
@@ -4317,6 +4604,32 @@ const App: React.FC = () => {
               </div>
               
               <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAllMonths(!showAllMonths)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 cursor-pointer border ${
+                      showAllMonths 
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100' 
+                        : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 shadow-sm'
+                    }`}
+                  >
+                    <CalendarRange size={12} />
+                    <span>{showAllMonths ? 'Show Current Month Only' : 'Get Previous Month Details'}</span>
+                  </button>
+                  {showAllMonths && (
+                    <select
+                      value={selectedHistoricalMonth}
+                      onChange={(e) => setSelectedHistoricalMonth(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[10px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      {historicalMonthsList.map(mY => (
+                        <option key={mY} value={mY}>
+                          {formatMMYYYY(mY)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <div className="flex bg-slate-200/60 p-1 rounded-xl">
                   <button 
                     onClick={() => { setMetadata({...metadata, fortnight: 'first'}); setSelectedDateIdx(0); }} 
@@ -4335,7 +4648,9 @@ const App: React.FC = () => {
                   {(() => {
                     const keys = new Set(availableDays.map(day => formatDate(day)));
                     const matched = activities.filter(act => keys.has(act.date));
-                    return `${matched.length} / ${availableDays.length} Days Completed`;
+                    return showAllMonths 
+                      ? `${historicalMonthActivitiesCount} Days Saved (${formatMMYYYY(selectedHistoricalMonth)})` 
+                      : `${matched.length} / ${availableDays.length} Days Completed`;
                   })()}
                 </div>
               </div>
@@ -4353,9 +4668,22 @@ const App: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {(() => {
                     const keys = new Set(availableDays.map(day => formatDate(day)));
-                    const matched = activities.filter(act => keys.has(act.date));
+                    const matched = showAllMonths 
+                      ? activities.filter(act => {
+                          if (!act || !act.date) return false;
+                          const parts = act.date.split('.');
+                          return parts.length === 3 && `${parts[1]}.${parts[2]}` === selectedHistoricalMonth;
+                        }).sort((a,b) => {
+                          const partsA = a.date.split('.');
+                          const partsB = b.date.split('.');
+                          if (partsA.length !== 3 || partsB.length !== 3) return 0;
+                          const dateA = new Date(parseInt(partsA[2]), parseInt(partsA[1]) - 1, parseInt(partsA[0]));
+                          const dateB = new Date(parseInt(partsB[2]), parseInt(partsB[1]) - 1, parseInt(partsB[0]));
+                          return dateB.getTime() - dateA.getTime();
+                        })
+                      : activities.filter(act => keys.has(act.date));
                     if (matched.length === 0) {
-                      return <tr><td colSpan={3} className="px-10 py-20 text-center text-slate-300 italic font-medium">No recorded days for this fortnight yet.</td></tr>;
+                      return <tr><td colSpan={3} className="px-10 py-20 text-center text-slate-300 italic font-medium">No recorded days found.</td></tr>;
                     }
                     return matched.map(act => (
                       <tr key={act.id} className="hover:bg-slate-50/20 transition-all group">
@@ -4405,6 +4733,32 @@ const App: React.FC = () => {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAllMonths(!showAllMonths)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 cursor-pointer border ${
+                      showAllMonths 
+                        ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100' 
+                        : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 shadow-sm'
+                    }`}
+                  >
+                    <CalendarRange size={12} />
+                    <span>{showAllMonths ? 'Show Current Month Only' : 'Get Previous Month Details'}</span>
+                  </button>
+                  {showAllMonths && (
+                    <select
+                      value={selectedHistoricalMonth}
+                      onChange={(e) => setSelectedHistoricalMonth(e.target.value)}
+                      className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[10px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    >
+                      {historicalMonthsList.map(mY => (
+                        <option key={mY} value={mY}>
+                          {formatMMYYYY(mY)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <div className="flex bg-slate-200/60 p-1 rounded-xl">
                   <button 
                     onClick={() => { setMetadata({...metadata, fortnight: 'first'}); setSelectedDateIdx(0); }} 
@@ -4448,9 +4802,22 @@ const App: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {(() => {
                     const keys = new Set(availableDays.map(day => formatDate(day)));
-                    const matched = movements.filter(m => keys.has(m.date));
+                    const matched = showAllMonths 
+                      ? movements.filter(m => {
+                          if (!m || !m.date) return false;
+                          const parts = m.date.split('.');
+                          return parts.length === 3 && `${parts[1]}.${parts[2]}` === selectedHistoricalMonth;
+                        }).sort((a,b) => {
+                          const partsA = a.date.split('.');
+                          const partsB = b.date.split('.');
+                          if (partsA.length !== 3 || partsB.length !== 3) return 0;
+                          const dateA = new Date(parseInt(partsA[2]), parseInt(partsA[1]) - 1, parseInt(partsA[0]));
+                          const dateB = new Date(parseInt(partsB[2]), parseInt(partsB[1]) - 1, parseInt(partsB[0]));
+                          return dateB.getTime() - dateA.getTime();
+                        })
+                      : movements.filter(m => keys.has(m.date));
                     if (matched.length === 0) {
-                      return <tr><td colSpan={9} className="px-10 py-20 text-center text-slate-300 italic font-medium">No movement logs for this fortnight yet.</td></tr>;
+                      return <tr><td colSpan={9} className="px-10 py-20 text-center text-slate-300 italic font-medium">No movement logs found.</td></tr>;
                     }
                     return matched.map((m) => (
                       <tr key={m.id} className={`hover:bg-slate-50/50 transition-all ${m.isManual ? 'bg-amber-50/20' : ''}`}>
@@ -5619,6 +5986,279 @@ const App: React.FC = () => {
           </div>
          </div>
        )}
+
+      {showTABillModal && (
+        <div id="ta-bill-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowTABillModal(false)}>
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setShowTABillModal(false)}
+              className="absolute top-5 right-5 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer"
+              title="Close Dialog"
+            >
+              <X size={18} />
+            </button>
+            
+            <div className="flex items-center gap-4 text-left">
+              <div className="p-3 bg-yellow-50 text-yellow-600 rounded-2xl">
+                <FileText size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">Generate TA Bill</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-yellow-600 mt-0.5">GAR - 14A Tour Bill Form</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Month
+                  </label>
+                  <select
+                    value={taBillMonth}
+                    onChange={(e) => setTaBillMonth(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-yellow-500 focus:bg-white transition-all text-sm"
+                  >
+                    {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, idx) => (
+                      <option key={m} value={idx}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Year
+                  </label>
+                  <select
+                    value={taBillYear}
+                    onChange={(e) => setTaBillYear(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-yellow-500 focus:bg-white transition-all text-sm"
+                  >
+                    {[2024, 2025, 2026, 2027].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                  S. No 3: Pay (Basic Pay Rs.)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 35400"
+                  value={taBillPay}
+                  onChange={(e) => setTaBillPay(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-yellow-500 focus:bg-white transition-all text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                  S. No 12: Amount of T.A. advance (if any)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Nil, or 5000"
+                  value={taBillAdvance}
+                  onChange={(e) => setTaBillAdvance(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-yellow-500 focus:bg-white transition-all text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowTABillModal(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0"
+              >
+                Cancel
+              </button>
+              <button
+                id="generate-ta-bill-btn"
+                onClick={() => {
+                  const tempMetadata = {
+                    ...metadata,
+                    month: taBillMonth,
+                    year: taBillYear
+                  };
+                  generateTABillDoc(tempMetadata, taBillPay, taBillAdvance);
+                  setShowTABillModal(false);
+                }}
+                className="flex-1 py-3 px-4 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center shadow-lg shadow-amber-100/50"
+              >
+                Generate Document
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExportDiaryModal && (
+        <div id="export-diary-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowExportDiaryModal(false)}>
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setShowExportDiaryModal(false)}
+              className="absolute top-5 right-5 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer"
+              title="Close Dialog"
+            >
+              <X size={18} />
+            </button>
+            
+            <div className="flex items-center gap-4 text-left">
+              <div className="p-3 bg-violet-50 text-violet-600 rounded-2xl">
+                <FileText size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">Export Dairy</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-violet-500 mt-0.5">Fortnightly Dairy Document</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Month
+                  </label>
+                  <select
+                    value={exportDiaryMonth}
+                    onChange={(e) => setExportDiaryMonth(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                  >
+                    {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, idx) => (
+                      <option key={m} value={idx}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Year
+                  </label>
+                  <select
+                    value={exportDiaryYear}
+                    onChange={(e) => setExportDiaryYear(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                  >
+                    {[2024, 2025, 2026, 2027].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                  Select Fortnight
+                </label>
+                <select
+                  value={exportDiaryFortnight}
+                  onChange={(e) => setExportDiaryFortnight(e.target.value as 'first' | 'second')}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                >
+                  <option value="first">First Fortnight (1st - 15th)</option>
+                  <option value="second">Second Fortnight (16th - End)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowExportDiaryModal(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0"
+              >
+                Cancel
+              </button>
+              <button
+                id="generate-diary-btn"
+                onClick={() => {
+                  handleExport(exportDiaryMonth, exportDiaryYear, exportDiaryFortnight);
+                  setShowExportDiaryModal(false);
+                }}
+                className="flex-1 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0 shadow-lg shadow-violet-100"
+              >
+                Generate Document
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExportTAModal && (
+        <div id="export-ta-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowExportTAModal(false)}>
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setShowExportTAModal(false)}
+              className="absolute top-5 right-5 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer"
+              title="Close Dialog"
+            >
+              <X size={18} />
+            </button>
+            
+            <div className="flex items-center gap-4 text-left">
+              <div className="p-3 bg-violet-50 text-violet-600 rounded-2xl">
+                <FileText size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">Export TA Calculation</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-violet-500 mt-0.5">TA Calculation Journal Sheet</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Month
+                  </label>
+                  <select
+                    value={exportTAMonth}
+                    onChange={(e) => setExportTAMonth(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                  >
+                    {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, idx) => (
+                      <option key={m} value={idx}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
+                    Select Year
+                  </label>
+                  <select
+                    value={exportTAYear}
+                    onChange={(e) => setExportTAYear(parseInt(e.target.value, 10))}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                  >
+                    {[2024, 2025, 2026, 2027].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowExportTAModal(false)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0"
+              >
+                Cancel
+              </button>
+              <button
+                id="generate-ta-calc-btn"
+                onClick={() => {
+                  handleExportTA(exportTAMonth, exportTAYear);
+                  setShowExportTAModal(false);
+                }}
+                className="flex-1 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0 shadow-lg shadow-violet-100"
+              >
+                Generate Document
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loginModalOpen && (
         <div id="web-sync-login-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setLoginModalOpen(false)}>

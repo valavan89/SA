@@ -10,6 +10,11 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Bypass service worker interception for all API requests and non-GET requests
+  if (event.request.url.includes('/api/') || event.request.method !== 'GET') {
+    return;
+  }
+
   // Network-first or bypass offline caching for active preview syncs
   event.respondWith(
     fetch(event.request).catch(() => {
