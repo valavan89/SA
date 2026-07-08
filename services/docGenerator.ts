@@ -1601,7 +1601,8 @@ export const generateMultipleServiceCallReportsDoc = async (
 export const generateTABillDoc = async (
   metadata: DiaryMetadata,
   payVal: string,
-  advanceVal: string
+  advanceVal: string,
+  defaultOffice?: string
 ) => {
   let nameVal = cleanText(metadata.name);
   if (!nameVal || nameVal === "R. Karikalvalavan" || nameVal === "Karikalvalavan R") {
@@ -1612,7 +1613,7 @@ export const generateTABillDoc = async (
     designation = "Postal Assistant- System Administrator";
   }
   const finalPay = payVal ? cleanText(payVal) : "38100+others";
-  let headquarters = cleanText(metadata.office || "Kurinjipadi S.O");
+  let headquarters = cleanText(defaultOffice || metadata.office || "Kurinjipadi S.O");
   if (headquarters === "Cuddalore HO" || headquarters === "Kurinjipadi SO" || headquarters === "Kurinjipadi S.O") {
     headquarters = "Kurinjipadi S.O";
   }

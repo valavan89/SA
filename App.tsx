@@ -6082,7 +6082,7 @@ const App: React.FC = () => {
                     month: taBillMonth,
                     year: taBillYear
                   };
-                  generateTABillDoc(tempMetadata, taBillPay, taBillAdvance);
+                  generateTABillDoc(tempMetadata, taBillPay, taBillAdvance, attachedOffice);
                   setShowTABillModal(false);
                 }}
                 className="flex-1 py-3 px-4 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center shadow-lg shadow-amber-100/50"
