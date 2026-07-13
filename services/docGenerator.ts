@@ -172,11 +172,11 @@ export const generateWordDoc = async (
               new TableRow({
                 children: [
                   new TableCell({
-                    width: { size: 0, type: WidthType.AUTO },
+                    width: { size: 15, type: WidthType.PERCENTAGE },
                     children: [new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: "DATE", bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })], alignment: AlignmentType.CENTER })],
                   }),
                   new TableCell({
-                    width: { size: 0, type: WidthType.AUTO },
+                    width: { size: 85, type: WidthType.PERCENTAGE },
                     children: [new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: "DETAILS", bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })], alignment: AlignmentType.CENTER })],
                   }),
                 ],
@@ -186,14 +186,14 @@ export const generateWordDoc = async (
                 return new TableRow({
                   children: [
                     new TableCell({
-                      width: { size: 0, type: WidthType.AUTO },
+                      width: { size: 15, type: WidthType.PERCENTAGE },
                       children: [
                         new Paragraph({ spacing: { before: 10, after: 0 }, children: [new TextRun({ text: cleanText(entry.date), size: DEFAULT_SIZE, font: DEFAULT_FONT })], alignment: AlignmentType.CENTER }),
                         new Paragraph({ spacing: { before: 0, after: 10 }, children: [new TextRun({ text: cleanText(entry.dayName), italics: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })], alignment: AlignmentType.CENTER }),
                       ],
                     }),
                     new TableCell({
-                      width: { size: 0, type: WidthType.AUTO },
+                      width: { size: 85, type: WidthType.PERCENTAGE },
                       children: lines.map(line => new Paragraph({ 
                         spacing: { before: 10, after: 10 },
                         children: [new TextRun({ text: cleanText(line), size: DEFAULT_SIZE, font: DEFAULT_FONT })] 
@@ -332,7 +332,14 @@ export const generateWordDoc = async (
   });
 
   const blob = await Packer.toBlob(doc);
-  saveAs(blob, `Diary_${nameVal.replace(/\s+/g, '_')}_${cleanText(metadata.fortnight)}_${metadata.month + 1}_${metadata.year}.docx`);
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const monthName = monthNames[metadata.month] || "June";
+  const fnStr = metadata.fortnight === 'first' ? '1st FN' : '2nd FN';
+  const fileName = `${monthName} ${fnStr} ${metadata.year}.docx`;
+  saveAs(blob, fileName);
 };
 
 const numberToIndianWords = (num: number): string => {
@@ -677,7 +684,7 @@ export const generateTACalculationsDoc = async (
                   }
                 }
 
-                // Food cell with proper vertical merge matching same date
+                // Food cell - merged layout for rows of the same date
                 let foodCell: TableCell;
                 if (isFirstForDate) {
                   foodCell = new TableCell({
@@ -700,13 +707,13 @@ export const generateTACalculationsDoc = async (
                     children: [
                       new Paragraph({
                         spacing: { before: 5, after: 5 },
-                        children: [new TextRun(" ")],
+                        children: [new TextRun("")],
                       }),
                     ],
                   });
                 }
 
-                // Purpose of visit cell with proper vertical merge matching same date
+                // Purpose of visit cell - merged layout for rows of the same date
                 let purposeCell: TableCell;
                 if (isFirstForDate) {
                   purposeCell = new TableCell({
@@ -729,7 +736,7 @@ export const generateTACalculationsDoc = async (
                     children: [
                       new Paragraph({
                         spacing: { before: 5, after: 5 },
-                        children: [new TextRun(" ")],
+                        children: [new TextRun("")],
                       }),
                     ],
                   });
@@ -875,7 +882,13 @@ export const generateTACalculationsDoc = async (
   });
 
   const blob = await Packer.toBlob(doc);
-  saveAs(blob, `TA_Calculations_${cleanText(metadata.name).replace(/\s+/g, '_')}_FullMonth_${metadata.month + 1}_${metadata.year}.docx`);
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const monthName = monthNames[metadata.month] || "June";
+  const fileName = `TA Calculation-${monthName} ${metadata.year}.docx`;
+  saveAs(blob, fileName);
 };
 
 export function toSentenceCase(text: string): string {
@@ -1614,9 +1627,6 @@ export const generateTABillDoc = async (
   }
   const finalPay = payVal ? cleanText(payVal) : "38100+others";
   let headquarters = cleanText(defaultOffice || metadata.office || "Kurinjipadi S.O");
-  if (headquarters === "Cuddalore HO" || headquarters === "Kurinjipadi SO" || headquarters === "Kurinjipadi S.O") {
-    headquarters = "Kurinjipadi S.O";
-  }
 
   const formatTABillDottedLine = (num: string, label: string, value: string) => {
     const labelText = `${num}. ${label}`;

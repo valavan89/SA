@@ -9,7 +9,7 @@ import {
   getMultipleServiceCallReportsBlob
 } from '../services/docGenerator';
 import { initAuth, googleSignIn, googleSignOut } from '../services/firebaseAuth';
-import { sendEmailWithAttachments } from '../services/gmailSender';
+import { getOrCreateFolder, uploadFileToGoogleDrive } from '../services/googleDrive';
 
 const OFFICE_EMAIL_MAP: Record<string, string> = {
   "alapakkam": "alapakkamso@indiapost.gov.in",
@@ -245,6 +245,15 @@ interface ServiceCallReportGeneratorProps {
   setSelectedHistoricalMonth?: (val: string) => void;
   historicalMonthsList?: string[];
   formatMMYYYY?: (val: string) => string;
+  scrDefaults?: {
+    divisionName: string;
+    callGivenBy: string;
+    timeIn: string;
+    timeOut: string;
+    replacementOfSpares: string;
+    amountOfSpares: string;
+    otherIssues: string;
+  };
 }
 
 export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProps> = ({
@@ -264,6 +273,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   setSelectedHistoricalMonth,
   historicalMonthsList = [],
   formatMMYYYY = (val) => val,
+  scrDefaults,
 }) => {
   const [editingCall, setEditingCall] = useState<{
     officeAttended: string;
@@ -282,17 +292,17 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const todayStr = `${pad(today.getDate())}.${pad(today.getMonth() + 1)}.${today.getFullYear()}`;
     return {
       officeAttended: '',
-      callGivenBy: 'SPM',
+      callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: '10:00 hrs',
-      timeOut: '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
-      replacementOfSpares: 'None',
-      amountOfSpares: 'None',
-      otherIssues: 'NSP 2',
-      divisionName: 'Cuddalore Division'
+      replacementOfSpares: scrDefaults?.replacementOfSpares || 'None',
+      amountOfSpares: scrDefaults?.amountOfSpares || 'None',
+      otherIssues: scrDefaults?.otherIssues || 'NSP 2',
+      divisionName: scrDefaults?.divisionName || 'Cuddalore Division'
     };
   });
 
@@ -309,17 +319,8 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   // Gmail Sending & OAuth states
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [gmailCompose, setGmailCompose] = useState<{
-    to: string;
-    subject: string;
-    body: string;
-    attachments: Array<{ fileName: string; blob: Blob }>;
-  } | null>(null);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isSavingToDrive, setIsSavingToDrive] = useState(false);
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
-  const [lastUsedRecipient, setLastUsedRecipient] = useState<string>(() => {
-    return localStorage.getItem('last_used_email_recipient') || '';
-  });
 
   useEffect(() => {
     const unsubscribe = initAuth(
@@ -362,48 +363,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     }
   };
 
-  const handleSendGmailEmail = async () => {
-    if (!gmailCompose) return;
-    if (!gmailCompose.to.trim()) {
-      alert("Please enter a recipient email address.");
-      return;
-    }
-    
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(gmailCompose.to.trim())) {
-      alert("Please enter a valid recipient email address.");
-      return;
-    }
 
-    setIsSendingEmail(true);
-    try {
-      const token = googleToken || await ensureGoogleAuth();
-      await sendEmailWithAttachments(
-        token,
-        gmailCompose.to.trim(),
-        gmailCompose.subject,
-        gmailCompose.body,
-        gmailCompose.attachments
-      );
-
-      localStorage.setItem('last_used_email_recipient', gmailCompose.to.trim());
-      setLastUsedRecipient(gmailCompose.to.trim());
-      setGmailCompose(null);
-
-      setConfirmModal({
-        title: "Email Sent Successfully!",
-        message: `Your report has been sent directly from your Gmail account to "${gmailCompose.to.trim()}"!`,
-        confirmText: "Awesome!",
-        accentColor: "emerald",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } catch (err: any) {
-      console.error("Failed to send email:", err);
-      alert(`Failed to send email: ${err.message || err}`);
-    } finally {
-      setIsSendingEmail(false);
-    }
-  };
 
   const parseSCRDate = (dateStr: string) => {
     const parts = dateStr.split('.');
@@ -539,9 +499,11 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
         return timeToMinutes(a.timeOut) - timeToMinutes(b.timeOut);
       });
 
-    // If this is the 1st SCR for the date, we do not auto-calculate / auto-change the time
+    // If this is the 1st SCR for the date, calculate starting from 09:00 + travel time from attached office
     if (sameDayCalls.length === 0) {
-      return '';
+      const travelMin = getTravelMinutes(attachedOffice, officeName, officesDb, transportMode);
+      const computedTimeMinutes = 9 * 60 + travelMin; // 09:00 is 540 minutes
+      return minutesToTimeStr(computedTimeMinutes);
     }
 
     const lastCall = sameDayCalls[sameDayCalls.length - 1];
@@ -630,19 +592,19 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     setIsDateExplicitlySelected(false);
     setEditingCall({
       officeAttended: '',
-      callGivenBy: 'SPM',
+      callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: '10:00 hrs',
-      timeOut: '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
-      replacementOfSpares: 'None',
-      amountOfSpares: 'None',
-      otherIssues: 'NSP 2',
-      divisionName: 'Cuddalore Division'
+      replacementOfSpares: scrDefaults?.replacementOfSpares || 'None',
+      amountOfSpares: scrDefaults?.amountOfSpares || 'None',
+      otherIssues: scrDefaults?.otherIssues || 'NSP 2',
+      divisionName: scrDefaults?.divisionName || 'Cuddalore Division'
     });
-  }, [activeProfile]);
+  }, [activeProfile, scrDefaults]);
 
   const handleSaveServiceCall = () => {
     if (!editingCall.officeAttended.trim()) {
@@ -709,17 +671,17 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const todayYmd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     setEditingCall({
       officeAttended: '',
-      callGivenBy: 'SPM',
+      callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: '10:00 hrs',
-      timeOut: '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
-      replacementOfSpares: 'None',
-      amountOfSpares: 'None',
-      otherIssues: 'NSP 2',
-      divisionName: 'Cuddalore Division'
+      replacementOfSpares: scrDefaults?.replacementOfSpares || 'None',
+      amountOfSpares: scrDefaults?.amountOfSpares || 'None',
+      otherIssues: scrDefaults?.otherIssues || 'NSP 2',
+      divisionName: scrDefaults?.divisionName || 'Cuddalore Division'
     });
     setSelectedSavedId(null);
     setDraftFilterDate(todayYmd);
@@ -744,22 +706,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     generateServiceCallReportDoc(metadata, attachedOffice, reportData);
   };
 
-  const handleShareOrEmailServiceCall = async (call?: ServiceCallReport) => {
-    if (!metadata.scrEmailRecipient || !metadata.scrEmailRecipient.trim()) {
-      setConfirmModal({
-        title: "SCR Email Not Linked",
-        message: "You must first configure and link a unique SCR Email Recipient under Profile Settings before sending any Service Call Reports via email.",
-        confirmText: "Go to Profile Settings",
-        accentColor: "rose",
-        onConfirm: () => {
-          setConfirmModal(null);
-          const el = document.getElementById('profile-section');
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }
-      });
-      return;
-    }
-
+  const handleSaveToGoogleDriveServiceCall = async (call?: ServiceCallReport) => {
     const rawReportData = call || { id: 'temp', ...editingCall };
     const reportData = {
       ...rawReportData,
@@ -776,86 +723,78 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       return;
     }
 
+    setIsSavingToDrive(true);
     try {
       // 1. Ensure Google Authenticated
       const token = await ensureGoogleAuth();
-      if (!token) return;
+      if (!token) {
+        setIsSavingToDrive(false);
+        return;
+      }
 
       // 2. Generate the report blob
       const { blob, fileName } = await getServiceCallReportBlob(metadata, attachedOffice, reportData);
 
-      // 3. Open local Gmail composer modal
-      const emailSubject = `Service Call Report - ${reportData.officeAttended} (${reportData.date})`;
-      const emailBody = `Hi,\n\nPlease find attached the Service Call Report for ${reportData.officeAttended} completed on ${reportData.date}.\n\nBest regards,\n${metadata.name}`;
+      // 3. Find or create the DiaryFlow folder in Google Drive
+      const folderId = await getOrCreateFolder(token, "DiaryFlow");
 
-      const targetToEmail = getOfficeEmail(reportData.officeAttended, metadata.scrEmailRecipient || '');
+      // 4. Upload file to Google Drive
+      await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
 
-      setGmailCompose({
-        to: targetToEmail,
-        subject: emailSubject,
-        body: emailBody,
-        attachments: [{ fileName, blob }]
+      setConfirmModal({
+        title: "Saved to Google Drive!",
+        message: `"${fileName}" has been successfully saved to your Google Drive in the "DiaryFlow" folder!`,
+        confirmText: "Awesome!",
+        accentColor: "emerald",
+        onConfirm: () => setConfirmModal(null)
       });
-    } catch (error) {
-      console.error("Error setting up Gmail composer:", error);
+    } catch (error: any) {
+      console.error("Error saving to Google Drive:", error);
+      alert(`Error saving to Google Drive: ${error.message || error}`);
+    } finally {
+      setIsSavingToDrive(false);
     }
   };
 
-  const handleShareOrEmailMultipleServiceCalls = async (items: ServiceCallReport[], titleLabel: string) => {
+  const handleSaveMultipleToGoogleDrive = async (items: ServiceCallReport[], titleLabel: string) => {
     if (items.length === 0) return;
 
-    if (!metadata.scrEmailRecipient || !metadata.scrEmailRecipient.trim()) {
-      setConfirmModal({
-        title: "SCR Email Not Linked",
-        message: "You must first configure and link a unique SCR Email Recipient under Profile Settings before sending any Service Call Reports via email.",
-        confirmText: "Go to Profile Settings",
-        accentColor: "rose",
-        onConfirm: () => {
-          setConfirmModal(null);
-          const el = document.getElementById('profile-section');
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }
-      });
-      return;
-    }
-
+    setIsSavingToDrive(true);
     try {
       // 1. Ensure Google Authenticated
       const token = await ensureGoogleAuth();
-      if (!token) return;
+      if (!token) {
+        setIsSavingToDrive(false);
+        return;
+      }
 
       // 2. Generate the merged report blob
       const result = await getMultipleServiceCallReportsBlob(metadata, attachedOffice, items);
-      if (!result) return;
+      if (!result) {
+        setIsSavingToDrive(false);
+        return;
+      }
 
       const { blob, fileName } = result;
 
-      // 3. Open local Gmail composer modal
-      const emailSubject = `Merged Service Call Reports - ${titleLabel}`;
-      const emailBody = `Hi,\n\nPlease find attached the compiled Service Call Reports for ${titleLabel}.\n\nBest regards,\n${metadata.name}`;
+      // 3. Find or create the DiaryFlow folder in Google Drive
+      const folderId = await getOrCreateFolder(token, "DiaryFlow");
 
-      let targetToEmail = metadata.scrEmailRecipient || '';
-      if (items.length > 0) {
-        const uniqueOffices = Array.from(new Set(items.map(item => item.officeAttended.trim()).filter(Boolean)));
-        if (uniqueOffices.length === 1) {
-          targetToEmail = getOfficeEmail(uniqueOffices[0], metadata.scrEmailRecipient || '');
-        } else if (uniqueOffices.length > 1) {
-          const emails = uniqueOffices.map(o => getOfficeEmail(o, '')).filter(Boolean);
-          const uniqueEmails = Array.from(new Set(emails));
-          if (uniqueEmails.length > 0) {
-            targetToEmail = uniqueEmails.join(', ');
-          }
-        }
-      }
+      // 4. Upload file to Google Drive
+      await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
 
-      setGmailCompose({
-        to: targetToEmail,
-        subject: emailSubject,
-        body: emailBody,
-        attachments: [{ fileName, blob }]
+      setConfirmModal({
+        title: "Saved to Google Drive!",
+        message: `"${fileName}" has been successfully saved to your Google Drive in the "DiaryFlow" folder!`,
+        confirmText: "Awesome!",
+        accentColor: "emerald",
+        onConfirm: () => setConfirmModal(null)
       });
-    } catch (error) {
-      console.error("Error setting up multiple Gmail composer:", error);
+    } catch (error: any) {
+      console.error("Error saving multiple to Google Drive:", error);
+      alert(`Error saving multiple to Google Drive: ${error.message || error}`);
+    } finally {
+      setIsSavingToDrive(false);
     }
   };
 
@@ -910,20 +849,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
         {/* Form Inputs (Left) */}
         <div className="lg:col-span-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
-            {/* 1. Division Name */}
-            <div className="md:col-span-2">
-              <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Division Name</label>
-              <input
-                id="service-call-division"
-                type="text"
-                placeholder="e.g., Cuddalore Division"
-                value={editingCall.divisionName}
-                onChange={(e) => setEditingCall(prev => ({ ...prev, divisionName: e.target.value }))}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
-              />
-            </div>
-
-            {/* 2. Date and Time */}
+            {/* 1. Date */}
             <div>
               <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Date</label>
               <input
@@ -939,36 +865,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time In</label>
-                <input
-                  id="service-call-time-in"
-                  type="time"
-                  value={hrsToTimeValue(editingCall.timeIn)}
-                  onChange={(e) => {
-                    const formatted = timeValueToHrs(e.target.value);
-                    setEditingCall(prev => ({ ...prev, timeIn: formatted }));
-                  }}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
-                />
-              </div>
-              <div>
-                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time Out</label>
-                <input
-                  id="service-call-time-out"
-                  type="time"
-                  value={hrsToTimeValue(editingCall.timeOut)}
-                  onChange={(e) => {
-                    const formatted = timeValueToHrs(e.target.value);
-                    setEditingCall(prev => ({ ...prev, timeOut: formatted }));
-                  }}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
-                />
-              </div>
-            </div>
-
-            {/* 3. Office Attended and Call Given By */}
+            {/* 2. Office Attended */}
             <div>
               <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Office Attended</label>
               <select
@@ -998,6 +895,37 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
               />
             </div>
 
+            {/* 3. Timing (Time In and Time Out) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time In</label>
+                <input
+                  id="service-call-time-in"
+                  type="time"
+                  value={hrsToTimeValue(editingCall.timeIn)}
+                  onChange={(e) => {
+                    const formatted = timeValueToHrs(e.target.value);
+                    setEditingCall(prev => ({ ...prev, timeIn: formatted }));
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
+                />
+              </div>
+              <div>
+                <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Time Out</label>
+                <input
+                  id="service-call-time-out"
+                  type="time"
+                  value={hrsToTimeValue(editingCall.timeOut)}
+                  onChange={(e) => {
+                    const formatted = timeValueToHrs(e.target.value);
+                    setEditingCall(prev => ({ ...prev, timeOut: formatted }));
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* 4. Call Given By */}
             <div>
               <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Call Given By</label>
               <input
@@ -1165,40 +1093,6 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
               >
                 <span>⬇️ Download</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const filterDateObj = draftFilterDate ? new Date(draftFilterDate) : new Date();
-                  const activeYear = filterDateObj.getFullYear();
-                  const activeMonth = filterDateObj.getMonth() + 1;
-                  const items = serviceCalls.filter(sc => {
-                    const parsed = parseSCRDate(sc.date);
-                    return parsed && parsed.year === activeYear && parsed.month === activeMonth && sc.officeAttended === selectedOfficeWise;
-                  });
-                  if (items.length === 0) {
-                    setConfirmModal({
-                      title: "No Drafts Found",
-                      message: `There are no saved drafts for ${selectedOfficeWise} in ${getSelectedMonthName()} to share.`,
-                      confirmText: "Close",
-                      accentColor: "rose",
-                      onConfirm: () => setConfirmModal(null)
-                    });
-                    return;
-                  }
-                  handleShareOrEmailMultipleServiceCalls(items, `${selectedOfficeWise} (${getSelectedMonthName()})`);
-                }}
-                disabled={!selectedOfficeWise}
-                className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shrink-0 flex items-center justify-center gap-1.5 ${
-                  selectedOfficeWise
-                    ? 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-                title="Email or Share Office-wise Reports"
-              >
-                <Mail size={12} />
-                <span>Email</span>
-              </button>
             </div>
           </div>
         </div>
@@ -1323,10 +1217,10 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                               timeIn: sc.timeIn,
                               timeOut: sc.timeOut,
                               problems: sc.problems,
-                              replacementOfSpares: sc.replacementOfSpares || 'None',
-                              amountOfSpares: sc.amountOfSpares || 'None',
-                              otherIssues: sc.otherIssues || 'NSP 2',
-                              divisionName: sc.divisionName || 'Cuddalore Division'
+                              replacementOfSpares: sc.replacementOfSpares || scrDefaults?.replacementOfSpares || 'None',
+                              amountOfSpares: sc.amountOfSpares || scrDefaults?.amountOfSpares || 'None',
+                              otherIssues: sc.otherIssues || scrDefaults?.otherIssues || 'NSP 2',
+                              divisionName: sc.divisionName || scrDefaults?.divisionName || 'Cuddalore Division'
                             });
                           }
                         }}
@@ -1361,17 +1255,6 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            handleShareOrEmailServiceCall(sc);
-                          }}
-                          className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-md border-0"
-                          title="Email or Share Report"
-                        >
-                          <Mail size={13} className="stroke-[3]" />
-                          <span>Email</span>
-                        </button>
-                        <button
-                          type="button"
                           onClick={(e) => handleDeleteServiceCall(sc.id, e)}
                           className="p-1.5 bg-red-50 hover:bg-red-100 text-red-500 rounded-lg border border-red-100 transition-all cursor-pointer"
                           title="Delete"
@@ -1388,138 +1271,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
         </div>
       </div>
 
-      {/* Gmail Composer Modal */}
-      {gmailCompose && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-[2rem] border-2 border-indigo-100 shadow-2xl overflow-hidden max-w-lg w-full max-h-[90vh] flex flex-col animate-scale-up">
-            {/* Modal Header */}
-            <div className="bg-indigo-600 px-6 py-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Mail className="stroke-[2.5]" size={20} />
-                <h3 className="text-sm font-black uppercase tracking-wider">Compose & Send Email</h3>
-              </div>
-              <button 
-                onClick={() => setGmailCompose(null)}
-                className="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all"
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            {/* Modal Scrollable Content */}
-            <div className="p-6 space-y-4 overflow-y-auto flex-1 text-left">
-              {/* Account details */}
-              {googleUser && (
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {googleUser.photoURL ? (
-                      <img src={googleUser.photoURL} alt={googleUser.displayName || 'Google User'} className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-black text-xs flex items-center justify-center">
-                        {googleUser.email ? googleUser.email[0].toUpperCase() : 'G'}
-                      </div>
-                    )}
-                    <span className="text-xs font-black text-slate-700">{googleUser.email}</span>
-                  </div>
-                  <button 
-                    onClick={async () => {
-                      await googleSignOut();
-                      setGoogleUser(null);
-                      setGoogleToken(null);
-                      setGmailCompose(null);
-                    }}
-                    className="text-[10px] text-red-500 hover:text-red-700 font-bold uppercase tracking-wider"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              )}
-
-              {/* To field */}
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">To (Recipient Email)</label>
-                <input
-                  type="email"
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
-                  placeholder="e.g. supervisor@domain.com"
-                  value={gmailCompose.to}
-                  onChange={(e) => setGmailCompose({ ...gmailCompose, to: e.target.value })}
-                />
-              </div>
-
-              {/* Subject field */}
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">Subject</label>
-                <input
-                  type="text"
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
-                  placeholder="Subject"
-                  value={gmailCompose.subject}
-                  onChange={(e) => setGmailCompose({ ...gmailCompose, subject: e.target.value })}
-                />
-              </div>
-
-              {/* Body field */}
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">Message Body</label>
-                <textarea
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all h-28 resize-none"
-                  placeholder="Write your message here..."
-                  value={gmailCompose.body}
-                  onChange={(e) => setGmailCompose({ ...gmailCompose, body: e.target.value })}
-                />
-              </div>
-
-              {/* Attachments List */}
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1">Attachments</label>
-                <div className="space-y-1.5">
-                  {gmailCompose.attachments.map((att, idx) => (
-                    <div key={idx} className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 flex items-center gap-2.5">
-                      <div className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">
-                        <Mail size={14} className="stroke-[2.5]" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-bold text-slate-800 truncate">{att.fileName}</p>
-                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider font-mono">
-                          {(att.blob.size / 1024).toFixed(1)} KB • DOCX Word Document
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="border-t border-slate-100 px-6 py-4 bg-slate-50 flex items-center justify-end gap-3 rounded-b-[2rem]">
-              <button
-                onClick={() => setGmailCompose(null)}
-                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendGmailEmail}
-                disabled={isSendingEmail}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shadow-md shadow-indigo-100 cursor-pointer flex items-center gap-1.5"
-              >
-                {isSendingEmail ? (
-                  <>
-                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                    <span>Sending...</span>
-                  </>
-                ) : (
-                  <>
-                    <Share2 size={12} />
-                    <span>Send Email Now</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Draft Viewer Modal */}
       {viewingScDraft && (

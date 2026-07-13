@@ -23,14 +23,19 @@ import {
   CloudDownload,
   Lock,
   CalendarRange,
-  Filter
+  Filter,
+  Sliders,
+  Settings2,
+  Zap,
+  Sparkles,
+  Bike
 } from 'lucide-react';
 import { DiaryMetadata, ActivityEntry, MovementEntry, OfficeVisit, OfficeDatabaseEntry, InterOfficeRouteEntry, ServiceCallReport } from './types';
 import { getFortnightDays, formatDate, formatDay, to24hDot, isMonthCompleted } from './utils/dateUtils';
 import { generateWordDoc, generateTACalculationsDoc, generateServiceCallReportDoc, generateTABillDoc } from './services/docGenerator';
 import { ServiceCallReportGenerator } from './components/ServiceCallReportGenerator';
-import { googleSignIn } from './services/firebaseAuth';
-import { sendEmailWithAttachments } from './services/gmailSender';
+import { googleSignIn, initAuth, googleSignOut } from './services/firebaseAuth';
+import { getOrCreateFolder, uploadFileToGoogleDrive, listBackupFiles, downloadFileContent } from './services/googleDrive';
 
 
 const PROFILE_1_OFFICES = [
@@ -509,9 +514,7 @@ const SPOKE_TO_HUB_BUS: Record<string, number> = {
 };
 
 const SPECIAL_SPOKE_MODES: Record<string, string> = { 
-  "Tirupadiripuliyur SO": "AUTO", 
-  "Vandipalayam SO": "AUTO", 
-  "Tirupadiripuliyur West SO": "AUTO" 
+  // By user request, these modes are user specific (fetched from user-selected bus or bike)
 };
 
 const INTER_OFFICE_DATA: Record<string, Record<string, { km: string, mode?: string, dur?: number, fare?: number }>> = {
@@ -654,12 +657,11 @@ const App: React.FC = () => {
     }
   });
 
-  // Email setup states
-  const [emailSetupPendingProfile, setEmailSetupPendingProfile] = useState<string | null>(null);
-  const [emailSetupInput, setEmailSetupInput] = useState<string>('');
-  const [emailSetupError, setEmailSetupError] = useState<string>('');
-  const [emailSetupDismissed, setEmailSetupDismissed] = useState<boolean>(false);
-  const [profileEmailInputError, setProfileEmailInputError] = useState<string>('');
+  // Google Drive states
+  const [isDriveBackingUp, setIsDriveBackingUp] = useState<boolean>(false);
+  const [isDriveRestoring, setIsDriveRestoring] = useState<boolean>(false);
+  const [driveBackups, setDriveBackups] = useState<any[] | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<any | null>(null);
 
   const loadedProfileRef = useRef<string>(
     localStorage.getItem('diary_active_profile') === "Default Profile"
@@ -668,6 +670,7 @@ const App: React.FC = () => {
   );
 
   const isFirstSyncEffectRef = useRef(true);
+  const lastSavedPayloadRef = useRef<any>(null);
 
   const [metadata, setMetadata] = useState<DiaryMetadata>(() => {
     const today = new Date();
@@ -731,16 +734,7 @@ const App: React.FC = () => {
     return false;
   }, []);
 
-  useEffect(() => {
-    if (!emailSetupDismissed) {
-      const linkedEmail = metadata.scrEmailRecipient || '';
-      if (!linkedEmail && !emailSetupPendingProfile) {
-        setEmailSetupPendingProfile(activeProfile);
-        setEmailSetupInput('');
-        setEmailSetupError('');
-      }
-    }
-  }, [activeProfile, metadata.scrEmailRecipient, emailSetupPendingProfile, emailSetupDismissed]);
+
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
@@ -798,6 +792,11 @@ const App: React.FC = () => {
     return saved ? parseInt(saved, 10) : null;
   });
   const [activeCloudPayload, setActiveCloudPayload] = useState<any | null>(null);
+  const [syncConflict, setSyncConflict] = useState<{
+    cloudPayload: any;
+    cloudUpdatedAt: number;
+    cloudDevice: string;
+  } | null>(null);
 
   // Free up local storage quota immediately
   useEffect(() => {
@@ -829,6 +828,7 @@ const App: React.FC = () => {
     payload[`${prefix}attached_office`] = attachedOffice;
     payload[`${prefix}offices_db`] = JSON.stringify(officesDb);
     payload[`${prefix}service_calls`] = JSON.stringify(serviceCalls);
+    payload[`${prefix}scr_defaults`] = JSON.stringify(scrDefaults);
     payload['diary_profiles_list'] = JSON.stringify(profiles);
     payload['diary_active_profile'] = activeProfile;
     if (!payload['diary_last_updated']) {
@@ -838,12 +838,15 @@ const App: React.FC = () => {
     return payload;
   };
 
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 3, delay = 1500): Promise<Response> => {
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 4, delay = 1500): Promise<Response> => {
     try {
       const response = await fetch(url, options);
-      if (!response.ok && response.status >= 500 && retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return fetchWithRetry(url, options, retries - 1, delay * 1.5);
+      if (!response.ok && retries > 0) {
+        const definitiveStatuses = [400, 401, 403, 409];
+        if (!definitiveStatuses.includes(response.status)) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return fetchWithRetry(url, options, retries - 1, delay * 1.5);
+        }
       }
       
       // If it's an API route and we get HTML (e.g., due to offline fallback, SPA fallback or service worker)
@@ -864,13 +867,15 @@ const App: React.FC = () => {
     }
   };
 
-  const syncWorkspaceToWebStorage = async (customUser?: { email: string; passcode: string }, customPayload?: any) => {
+  const syncWorkspaceToWebStorage = async (customUser?: { email: string; passcode: string }, customPayload?: any, isForced?: boolean) => {
     const userToSync = customUser || webSyncUser;
     if (!userToSync) return;
 
     setWebSyncStatus('syncing');
     try {
       const payload = customPayload || getLocalStorageSyncPayload();
+      const prevCloudUpdatedAt = webSyncUpdatedAt || localStorage.getItem('diary_websync_updated_at');
+
       const response = await fetchWithRetry('/api/web-storage/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -878,9 +883,25 @@ const App: React.FC = () => {
           email: userToSync.email,
           passcode: userToSync.passcode,
           payload,
-          device: getDeviceType()
+          device: getDeviceType(),
+          previousCloudUpdatedAt: prevCloudUpdatedAt ? parseInt(prevCloudUpdatedAt.toString(), 10) : undefined,
+          force: isForced
         })
       });
+
+      if (response.status === 409) {
+        const conflictData = await response.json().catch(() => null);
+        if (conflictData && conflictData.conflict) {
+          setWebSyncStatus('error');
+          setWebSyncErrorMessage('Sync conflict detected.');
+          setSyncConflict({
+            cloudPayload: conflictData.cloudPayload,
+            cloudUpdatedAt: conflictData.cloudUpdatedAt,
+            cloudDevice: conflictData.cloudDevice || "Other Device"
+          });
+          return;
+        }
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: 'Save failed' }));
@@ -898,6 +919,7 @@ const App: React.FC = () => {
         }
         // Save the active payload we just saved to cloud
         setActiveCloudPayload(payload);
+        lastSavedPayloadRef.current = payload;
       }
       
       setWebSyncStatus('synced');
@@ -912,6 +934,7 @@ const App: React.FC = () => {
     const initCloudProfile = async () => {
       if (!webSyncUser) {
         setIsInitialSyncCompleted(true);
+        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
         return;
       }
 
@@ -920,6 +943,7 @@ const App: React.FC = () => {
         sessionStorage.removeItem('diary_sync_reloaded');
         setWebSyncStatus('synced');
         setIsInitialSyncCompleted(true);
+        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
         return;
       }
 
@@ -989,11 +1013,13 @@ const App: React.FC = () => {
         
         // If identical or no payload, we are active & synced!
         setWebSyncStatus('synced');
+        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
         setIsInitialSyncCompleted(true);
       } catch (err: any) {
         console.error('[Web Storage Initial Load] Error:', err);
         setWebSyncStatus('error');
         setWebSyncErrorMessage(err.message || 'Connection lost.');
+        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
         setIsInitialSyncCompleted(true);
       }
     };
@@ -1213,6 +1239,41 @@ const App: React.FC = () => {
     const key = activeProfile === "Karikalvalavan R" ? "diary_confirmed_scr_days" : `diary_profile_${activeProfile}_confirmed_scr_days`;
     localStorage.setItem(key, JSON.stringify(confirmedScrDays));
   }, [confirmedScrDays, activeProfile]);
+
+  const [scrDefaults, setScrDefaults] = useState<{
+    divisionName: string;
+    callGivenBy: string;
+    timeIn: string;
+    timeOut: string;
+    replacementOfSpares: string;
+    amountOfSpares: string;
+    otherIssues: string;
+  }>(() => {
+    const rawProf = localStorage.getItem('diary_active_profile') || "Karikalvalavan R";
+    const actProf = rawProf === "Default Profile" ? "Karikalvalavan R" : rawProf;
+    const key = actProf === "Karikalvalavan R" ? "diary_scr_defaults" : `diary_profile_${actProf}_scr_defaults`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return {
+      divisionName: 'Cuddalore Division',
+      callGivenBy: 'SPM',
+      timeIn: '09:00 hrs',
+      timeOut: '17:00 hrs',
+      replacementOfSpares: 'None',
+      amountOfSpares: 'None',
+      otherIssues: 'NSP 2'
+    };
+  });
+
+  useEffect(() => {
+    if (loadedProfileRef.current !== activeProfile) return;
+    const key = activeProfile === "Karikalvalavan R" ? "diary_scr_defaults" : `diary_profile_${activeProfile}_scr_defaults`;
+    localStorage.setItem(key, JSON.stringify(scrDefaults));
+  }, [scrDefaults, activeProfile]);
 
   useEffect(() => {
     if (loadedProfileRef.current !== activeProfile) return;
@@ -1563,6 +1624,30 @@ const App: React.FC = () => {
       return;
     }
 
+    const currentPayload = getLocalStorageSyncPayload();
+    
+    // Safety check: only save if there is an actual change in the data values!
+    if (lastSavedPayloadRef.current) {
+      const keys1 = Object.keys(currentPayload).filter(k => k !== 'diary_last_updated');
+      const keys2 = Object.keys(lastSavedPayloadRef.current).filter(k => k !== 'diary_last_updated');
+      let isIdentical = keys1.length === keys2.length;
+      if (isIdentical) {
+        for (const key of keys1) {
+          if (currentPayload[key] !== lastSavedPayloadRef.current[key]) {
+            isIdentical = false;
+            break;
+          }
+        }
+      }
+      if (isIdentical) {
+        // Content hasn't changed from the last synced state! Prevent accidental override.
+        return;
+      }
+    }
+
+    // Update last saved payload snapshot
+    lastSavedPayloadRef.current = currentPayload;
+
     // Bump the modification timestamp only because a real user edit occurred
     localStorage.setItem('diary_last_updated', Date.now().toString());
 
@@ -1584,46 +1669,9 @@ const App: React.FC = () => {
     webSyncUser
   ]);
 
-  const isEmailLinkedToOtherProfile = (email: string, currentProfile: string, profilesList: string[]): string | null => {
-    const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail) return null;
-    
-    for (const p of profilesList) {
-      if (p === currentProfile) continue;
-      const key = p === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${p}_metadata`;
-      const metaStr = localStorage.getItem(key);
-      if (metaStr) {
-        try {
-          const parsed = JSON.parse(metaStr);
-          if (parsed.scrEmailRecipient && parsed.scrEmailRecipient.trim().toLowerCase() === trimmedEmail) {
-            return p;
-          }
-        } catch {}
-      }
-    }
-    return null;
-  };
+
 
   const switchProfile = (newProfileName: string) => {
-    // 1. Check Email Setup
-    const emailKey = newProfileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${newProfileName}_metadata`;
-    const savedMeta = localStorage.getItem(emailKey);
-    let linkedEmail = '';
-    if (savedMeta) {
-      try {
-        const parsed = JSON.parse(savedMeta);
-        linkedEmail = parsed.scrEmailRecipient || '';
-      } catch {}
-    }
-
-    if (!linkedEmail) {
-      setEmailSetupPendingProfile(newProfileName);
-      setEmailSetupInput('');
-      setEmailSetupError('');
-      return;
-    }
-
-    // 3. Complete Switch
     executeSwitchProfile(newProfileName);
   };
 
@@ -1652,10 +1700,12 @@ const App: React.FC = () => {
     const keyConfirmedScrDays = oldProf === "Karikalvalavan R" ? "diary_confirmed_scr_days" : `diary_profile_${oldProf}_confirmed_scr_days`;
     localStorage.setItem(keyConfirmedScrDays, JSON.stringify(confirmedScrDays));
 
+    const keyScrDefaults = oldProf === "Karikalvalavan R" ? "diary_scr_defaults" : `diary_profile_${oldProf}_scr_defaults`;
+    localStorage.setItem(keyScrDefaults, JSON.stringify(scrDefaults));
+
     // Update loadedProfileRef BEFORE setting activeProfile to let effects run again for new profile
     loadedProfileRef.current = newProfileName;
     setActiveProfile(newProfileName);
-    setEmailSetupDismissed(false);
     localStorage.setItem('diary_active_profile', newProfileName);
 
     // Read the values for the new profile
@@ -1776,6 +1826,18 @@ const App: React.FC = () => {
     // Confirmed SCR Days
     const savedConfirmedScr = getNewVal('confirmed_scr_days');
     setConfirmedScrDays(savedConfirmedScr ? JSON.parse(savedConfirmedScr) : {});
+
+    // SCR Defaults
+    const savedScrDefaults = getNewVal('scr_defaults');
+    setScrDefaults(savedScrDefaults ? JSON.parse(savedScrDefaults) : {
+      divisionName: 'Cuddalore Division',
+      callGivenBy: 'SPM',
+      timeIn: '09:00 hrs',
+      timeOut: '17:00 hrs',
+      replacementOfSpares: 'None',
+      amountOfSpares: 'None',
+      otherIssues: 'NSP 2'
+    });
   };
 
   const purgeKeysForProfile = (profileName: string, keepProfile: boolean = false) => {
@@ -1796,18 +1858,7 @@ const App: React.FC = () => {
     
     const prefixes = variants.map(v => v === "Karikalvalavan R" ? "diary_" : `diary_profile_${v}_`);
 
-    // Preserve email recipient if we are keeping the profile
-    let preservedEmail = '';
-    if (keepProfile) {
-      const emailKey = profileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${profileName}_metadata`;
-      const savedMeta = localStorage.getItem(emailKey);
-      if (savedMeta) {
-        try {
-          const parsed = JSON.parse(savedMeta);
-          preservedEmail = parsed.scrEmailRecipient || '';
-        } catch {}
-      }
-    }
+
 
     // 1. Delete from localStorage
     for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -1848,15 +1899,7 @@ const App: React.FC = () => {
       setActiveCloudPayload(nextCloud);
     }
 
-    // 3. Re-save preserved email recipient if needed
-    if (keepProfile && preservedEmail) {
-      const emailKey = profileName === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${profileName}_metadata`;
-      const newMeta = { scrEmailRecipient: preservedEmail };
-      localStorage.setItem(emailKey, JSON.stringify(newMeta));
-      if (activeCloudPayload) {
-        setActiveCloudPayload(prev => prev ? { ...prev, [emailKey]: JSON.stringify(newMeta) } : null);
-      }
-    }
+
   };
 
   const addNewProfile = (name: string) => {
@@ -2104,11 +2147,39 @@ const App: React.FC = () => {
         startTime: cleanHrsToTime(matching.timeIn),
         endTime: cleanHrsToTime(matching.timeOut),
         issues: finalIssues,
-        resolution: ''
+        resolution: '',
+        isManualTime: true
       };
     });
 
-    setVisits(newVisits);
+    const isFormUnmodified = (vList: OfficeVisit[]) => {
+      if (vList.length === 0) return true;
+      if (vList.length > 1) return false;
+      const first = vList[0];
+      const isOfficeDefaultOrEmpty = first.officeName === attachedOffice || !first.officeName || first.officeName.trim() === '';
+      const isTimeDefault = first.startTime === '09:00' && first.endTime === '17:00';
+      const isDetailsEmpty = (!first.issues || first.issues.trim() === '') && (!first.resolution || first.resolution === '');
+      return isOfficeDefaultOrEmpty && isTimeDefault && isDetailsEmpty;
+    };
+
+    let mergedVisits = [];
+    if (isFormUnmodified(visits)) {
+      mergedVisits = newVisits;
+    } else {
+      // Filter out SCR entries that are already manually entered (same office and start time)
+      const filteredNewVisits = newVisits.filter(newV => {
+        return !visits.some(existing => 
+          existing.officeName.toLowerCase().trim() === newV.officeName.toLowerCase().trim() &&
+          existing.startTime === newV.startTime
+        );
+      });
+      mergedVisits = [...visits, ...filteredNewVisits];
+    }
+
+    // Sort chronologically
+    mergedVisits.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+
+    setVisits(recalculateVisitsSequence(mergedVisits));
   };
 
   useEffect(() => {
@@ -2564,6 +2635,11 @@ const App: React.FC = () => {
 
 
   const getTravelDur = (officeName: string, mode?: string) => {
+    if (!officeName) return 0;
+    const cleanOffice = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
+    const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (cleanOffice === cleanAttached) return 0;
+
     const matched = officesDb.find(o => {
       const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
       const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -2644,6 +2720,11 @@ const App: React.FC = () => {
   };
 
   const getTravelKm = (officeName: string, mode?: string) => {
+    if (!officeName) return 0;
+    const cleanOffice = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
+    const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (cleanOffice === cleanAttached) return 0;
+
     const matched = officesDb.find(o => {
       const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
       const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -2699,6 +2780,11 @@ const App: React.FC = () => {
   };
 
   const getTravelBusFare = (officeName: string) => {
+    if (!officeName) return 0;
+    const cleanOffice = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
+    const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (cleanOffice === cleanAttached) return 0;
+
     const matched = officesDb.find(o => {
       const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
       const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -2776,7 +2862,7 @@ const App: React.FC = () => {
     let updated = [...currentVisits];
     if (updated.length > 0) {
       const first = updated[0];
-      if (first.officeName) {
+      if (first.officeName && !first.isManualTime) {
         const travelDur = getTravelDur(first.officeName, mode);
         const newStartTime = addMinutesToTime("09:00", travelDur);
         if (first.startTime !== newStartTime) {
@@ -2793,7 +2879,7 @@ const App: React.FC = () => {
     for (let idx = 1; idx < updated.length; idx++) {
       const prev = updated[idx - 1];
       const v = updated[idx];
-      if (prev.officeName && v.officeName) {
+      if (prev.officeName && v.officeName && !v.isManualTime) {
         let travelDur = 20;
         const spec = getInterOfficeSpec(prev.officeName, v.officeName, mode);
         if (spec) {
@@ -2969,6 +3055,207 @@ const App: React.FC = () => {
       }
     }
     return newMoves;
+  };
+
+  const runBikeOptimizer = () => {
+    // 1. Get all activities of the current month
+    const currentMonthActs = activities.filter(act => {
+      if (!act || !act.date) return false;
+      const parts = act.date.split('.');
+      return parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr;
+    });
+
+    // 2. Identify candidate days
+    const candidates = currentMonthActs.map(act => {
+      const realVisits = act.visits.filter(v => v.officeName && v.officeName.toLowerCase().replace(/\s+/g, ' ').trim() !== attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim());
+      if (realVisits.length === 0) return null;
+      
+      const bikeMoves = generateMovementsForDay({ ...act, transportMode: 'Bike' });
+      const bikeKM = bikeMoves
+        .filter(m => (m.mode || '').toUpperCase() === 'BIKE')
+        .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+        
+      const busMoves = generateMovementsForDay({ ...act, transportMode: 'Bus' });
+      const busKM = busMoves
+        .filter(m => (m.mode || '').toUpperCase() === 'BIKE')
+        .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+        
+      return {
+        id: act.id,
+        date: act.date,
+        bikeKM,
+        busKM,
+        gain: Math.max(0, bikeKM - busKM),
+        originalAct: act
+      };
+    }).filter(Boolean) as { id: string; date: string; bikeKM: number; busKM: number; gain: number; originalAct: any }[];
+
+    if (candidates.length === 0) {
+      setConfirmModal({
+        title: "No Candidates Found",
+        message: "We couldn't find any saved days with office visits in the current month to optimize. Please fill and save some days first!",
+        confirmText: "Understood",
+        accentColor: "rose",
+        onConfirm: () => setConfirmModal(null)
+      });
+      return;
+    }
+
+    // 3. Constant/Baseline Bike KM from movements in other months or non-candidate movements in current month (e.g. manual entries)
+    const candidateDates = new Set(candidates.map(c => c.date));
+    const nonCandidateBikeKM = currentMonthMovements
+      .filter(m => !candidateDates.has(m.date) && (m.mode || '').toUpperCase() === 'BIKE')
+      .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
+
+    const baselineWithAllBus = nonCandidateBikeKM + candidates.reduce((sum, c) => sum + c.busKM, 0);
+
+    // Target is 200 - baselineWithAllBus
+    const targetKM = 200 - baselineWithAllBus;
+    
+    if (targetKM <= 0) {
+      setOptimizationResult({
+        candidates,
+        selectedIds: [],
+        totalKM: baselineWithAllBus,
+        baselineWithAllBus,
+        nonCandidateBikeKM,
+        message: "Your baseline travel (or custom entries) already equals or exceeds the 200 km target! No extra bike days are required."
+      });
+      return;
+    }
+
+    // Scale weights by 10
+    const scaledTarget = Math.ceil(targetKM * 10);
+    const scaledCandidates = candidates.map((c, idx) => ({
+      index: idx,
+      id: c.id,
+      weight: Math.round(c.gain * 10),
+      originalAct: c.originalAct
+    })).filter(sc => sc.weight > 0);
+
+    const totalWeightSum = scaledCandidates.reduce((sum, sc) => sum + sc.weight, 0);
+    
+    if (totalWeightSum < scaledTarget) {
+      const maxPossibleBikeKM = baselineWithAllBus + candidates.reduce((sum, c) => sum + c.gain, 0);
+      setOptimizationResult({
+        candidates,
+        selectedIds: candidates.map(c => c.id),
+        totalKM: maxPossibleBikeKM,
+        baselineWithAllBus,
+        nonCandidateBikeKM,
+        insufficient: true,
+        message: `Even by setting all candidate days to BIKE mode, the maximum possible distance is ${maxPossibleBikeKM.toFixed(1)} km (which is less than the 200 km target).`
+      });
+      return;
+    }
+
+    // DP algorithm
+    const maxW = totalWeightSum;
+    const dp = new Array(maxW + 1).fill(false);
+    const parent = new Array(maxW + 1).fill(-1);
+    const choice = new Array(maxW + 1).fill(-1);
+    
+    dp[0] = true;
+    
+    for (let i = 0; i < scaledCandidates.length; i++) {
+      const w = scaledCandidates[i].weight;
+      for (let v = maxW; v >= w; v--) {
+        if (dp[v - w] && !dp[v]) {
+          dp[v] = true;
+          parent[v] = v - w;
+          choice[v] = i;
+        }
+      }
+    }
+    
+    let bestW = -1;
+    for (let v = scaledTarget; v <= maxW; v++) {
+      if (dp[v]) {
+        bestW = v;
+        break;
+      }
+    }
+    
+    const selectedIds: string[] = [];
+    if (bestW !== -1) {
+      let curr = bestW;
+      while (curr > 0) {
+        const idx = choice[curr];
+        if (idx !== -1 && idx !== undefined) {
+          selectedIds.push(scaledCandidates[idx].id);
+          curr = parent[curr];
+        } else {
+          break;
+        }
+      }
+    }
+
+    const optimalTotalKM = baselineWithAllBus + (bestW / 10);
+
+    setOptimizationResult({
+      candidates,
+      selectedIds,
+      totalKM: optimalTotalKM,
+      baselineWithAllBus,
+      nonCandidateBikeKM,
+      message: `We found a configuration with exactly ${optimalTotalKM.toFixed(1)} km!`
+    });
+  };
+
+  const applyBikeOptimization = (selectedIds: string[], candidates: any[]) => {
+    const selectedSet = new Set(selectedIds);
+    const updatedActsMap = new Map();
+    
+    candidates.forEach(c => {
+      const targetMode = selectedSet.has(c.id) ? 'Bike' : 'Bus';
+      
+      const dParts = c.originalAct.date.split('.');
+      const dObj = new Date(parseInt(dParts[2]), parseInt(dParts[1]) - 1, parseInt(dParts[0]));
+      const dayName = formatDay(dObj);
+      
+      updatedActsMap.set(c.id, {
+        ...c.originalAct,
+        transportMode: targetMode,
+        details: c.originalAct.leaveType === 'CL' ? 'CASUAL LEAVE' : c.originalAct.leaveType === 'EL' ? 'EARNED LEAVE' : computeDetails(c.originalAct.visits, c.originalAct.date, dayName, targetMode, c.originalAct.workedOnHoliday)
+      });
+    });
+
+    setActivities(prev => {
+      return prev.map(act => {
+        if (updatedActsMap.has(act.id)) {
+          return updatedActsMap.get(act.id);
+        }
+        return act;
+      });
+    });
+
+    setMovements(prev => {
+      const candidateDates = new Set(candidates.map(c => c.date));
+      const filteredMovements = prev.filter(m => !candidateDates.has(m.date) || m.isManual);
+      
+      const newMoves: MovementEntry[] = [];
+      candidates.forEach(c => {
+        const updatedAct = updatedActsMap.get(c.id);
+        const dayMoves = generateMovementsForDay(updatedAct);
+        newMoves.push(...dayMoves);
+      });
+
+      const combined = [...filteredMovements, ...newMoves].sort((a, b) => {
+        const dComp = a.date.split('.').reverse().join('').localeCompare(b.date.split('.').reverse().join(''));
+        return dComp !== 0 ? dComp : a.fromTime.localeCompare(b.fromTime);
+      });
+      return combined;
+    });
+
+    setOptimizationResult(null);
+
+    setConfirmModal({
+      title: "Optimization Applied! 🚴",
+      message: `Successfully set ${selectedIds.length} days to BIKE mode and ${candidates.length - selectedIds.length} days to BUS mode.\n\nYour total monthly Bike distance is now optimized.`,
+      confirmText: "Super, Got It!",
+      accentColor: "emerald",
+      onConfirm: () => setConfirmModal(null)
+    });
   };
 
   const handleSaveDay = () => {
@@ -3257,11 +3544,33 @@ const App: React.FC = () => {
     });
   };
 
+  const resolveSyncConflictWithDownload = (cloudPayload: any, cloudUpdatedAt: number) => {
+    Object.entries(cloudPayload).forEach(([key, val]) => {
+      if (typeof val === 'string') {
+        localStorage.setItem(key, val);
+      }
+    });
+    localStorage.setItem('diary_websync_updated_at', cloudUpdatedAt.toString());
+    setWebSyncUpdatedAt(cloudUpdatedAt);
+    setActiveCloudPayload(cloudPayload);
+    setSyncConflict(null);
+    setWebSyncStatus('synced');
+    sessionStorage.setItem('diary_sync_reloaded', '1');
+    window.location.reload();
+  };
+
+  const resolveSyncConflictWithForceOverwrite = async () => {
+    if (!webSyncUser) return;
+    setSyncConflict(null);
+    await syncWorkspaceToWebStorage(undefined, getLocalStorageSyncPayload(), true);
+  };
+
   const handleCloudUpload = async () => {
     setIsUploading(true);
     try {
       const payload = {
-        version: "1.0",
+        version: "2.0",
+        fullStorage: getLocalStorageSyncPayload(),
         metadata,
         activities,
         movements,
@@ -3286,7 +3595,7 @@ const App: React.FC = () => {
         setActiveCloudPin(result.pin);
         setConfirmModal({
           title: "Uploaded to Cloud! ☁️",
-          message: `Your workspace data is now securely stored in our cloud cache. Your 6-digit Sync PIN is:\n\n${result.pin.slice(0,3)} ${result.pin.slice(3)}\n\nEnter this PIN on your mobile device to complete download & restoration instantly! (Active for 48 hours)`,
+          message: `Your entire multi-profile workspace data (including all diaries, transits, service calls, and custom databases) is now securely saved in our cloud cache.\n\nYour 6-Digit Sync PIN is:\n\n${result.pin.slice(0,3)} ${result.pin.slice(3)}\n\nEnter this PIN on your other device to download & restore instantly! (Active for 48 hours)`,
           confirmText: "Super, Got It!",
           accentColor: "emerald",
           onConfirm: () => setConfirmModal(null)
@@ -3312,7 +3621,7 @@ const App: React.FC = () => {
     if (!pin) {
       setConfirmModal({
         title: "Enter a Valid PIN",
-        message: "Please enter the 6-digit PIN generated from your computer to download your backup.",
+        message: "Please enter the 6-digit PIN generated from your computer/other device to download your backup.",
         confirmText: "Retry",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
@@ -3333,25 +3642,67 @@ const App: React.FC = () => {
         const parsed = result.data;
         setConfirmModal({
           title: "Cloud Sync Data Found! ☁️",
-          message: `We found a valid backup containing ${parsed.activities?.length || 0} entries and professional profiles. This will restore and sync entries filled on your computer (including June 1-8). Do you want to load this data and overwrite current browser entries?`,
+          message: `We found a valid backup containing all your active diaries, transits, service calls, and configured profiles. This will restore and sync everything. Do you want to load this data and overwrite current browser entries?`,
           confirmText: "Yes, Synchronize",
           cancelText: "No, Cancel",
           accentColor: "blue",
           onConfirm: () => {
-            if (parsed.metadata) setMetadata(parsed.metadata);
-            if (parsed.activities) setActivities(parsed.activities);
-            if (parsed.movements) setMovements(parsed.movements);
-            let finalOffices = parsed.officesDb || [];
-            if (parsed.interOfficeDb) {
-              finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
+            if (parsed.fullStorage) {
+              const storage = parsed.fullStorage;
+              Object.keys(storage).forEach(key => {
+                localStorage.setItem(key, storage[key]);
+              });
+              
+              const activeProf = localStorage.getItem('diary_active_profile') || "Karikalvalavan R";
+              const prefix = activeProf === "Karikalvalavan R" ? "diary_" : `diary_profile_${activeProf}_`;
+              
+              const savedProfiles = localStorage.getItem('diary_profiles_list');
+              if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
+              
+              setActiveProfile(activeProf);
+              loadedProfileRef.current = activeProf;
+              
+              const metaVal = localStorage.getItem(`${prefix}metadata`);
+              if (metaVal) setMetadata(JSON.parse(metaVal));
+              
+              const actVal = localStorage.getItem(`${prefix}activities`);
+              if (actVal) setActivities(JSON.parse(actVal));
+              
+              const movVal = localStorage.getItem(`${prefix}movements`);
+              if (movVal) setMovements(JSON.parse(movVal));
+              
+              const attOffice = localStorage.getItem(`${prefix}attached_office`);
+              if (attOffice) setAttachedOffice(attOffice);
+              
+              const offDb = localStorage.getItem(`${prefix}offices_db`);
+              if (offDb) setOfficesDb(JSON.parse(offDb));
+              
+              const servCalls = localStorage.getItem(`${prefix}service_calls`);
+              if (servCalls) setServiceCalls(JSON.parse(servCalls));
+              
+              const confScr = localStorage.getItem(`${prefix}confirmed_scr_days`);
+              if (confScr) setConfirmedScrDays(JSON.parse(confScr));
+              
+              const scrDef = localStorage.getItem(`${prefix}scr_defaults`);
+              if (scrDef) setScrDefaults(JSON.parse(scrDef));
+              
+            } else {
+              // Backward compatibility for 1.0 single profile payload
+              if (parsed.metadata) setMetadata(parsed.metadata);
+              if (parsed.activities) setActivities(parsed.activities);
+              if (parsed.movements) setMovements(parsed.movements);
+              let finalOffices = parsed.officesDb || [];
+              if (parsed.interOfficeDb) {
+                finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
+              }
+              if (finalOffices.length > 0) setOfficesDb(finalOffices);
+              if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
             }
-            if (finalOffices.length > 0) setOfficesDb(finalOffices);
-            if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
             
             setSyncPinInput('');
             setConfirmModal({
               title: "Cloud Sync Complete!",
-              message: `Fantastic! Successfully synchronized all ${parsed.activities?.length || 0} date entries and settings over to this device.`,
+              message: "Fantastic! Successfully synchronized all profiles, diaries, and settings over to this device.",
               confirmText: "Great!",
               accentColor: "emerald",
               onConfirm: () => setConfirmModal(null)
@@ -3546,59 +3897,137 @@ const App: React.FC = () => {
   };
 
 
-  const handleEmailSetupSubmit = (e?: React.FormEvent, isLinkAction?: boolean) => {
-    if (e) e.preventDefault();
-    if (!emailSetupPendingProfile) return;
-    
-    const inputEmail = emailSetupInput.trim();
-    if (!inputEmail) {
-      setEmailSetupError('Email address is required.');
-      return;
-    }
-    
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(inputEmail)) {
-      setEmailSetupError('Please enter a valid email address.');
-      return;
+  const ensureDriveAuth = async (): Promise<string | null> => {
+    const existingToken = localStorage.getItem('google_access_token');
+    const existingExpiry = localStorage.getItem('google_access_token_expires_at');
+    if (existingToken && existingExpiry && parseInt(existingExpiry, 10) > Date.now()) {
+      return existingToken;
     }
 
-    const duplicateProfile = isEmailLinkedToOtherProfile(inputEmail, emailSetupPendingProfile, profiles);
-    if (duplicateProfile) {
-      setEmailSetupError(`This mail ID is already linked to the profile "${duplicateProfile}". Please use a different unique email address.`);
-      return;
-    }
-
-    // Save email address in profile metadata
-    const emailKey = emailSetupPendingProfile === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${emailSetupPendingProfile}_metadata`;
-    const savedMetaStr = localStorage.getItem(emailKey);
-    let updatedMeta: any = {};
-    if (savedMetaStr) {
-      try {
-        updatedMeta = JSON.parse(savedMetaStr);
-      } catch {}
-    }
-    updatedMeta.scrEmailRecipient = inputEmail;
-    localStorage.setItem(emailKey, JSON.stringify(updatedMeta));
-
-    // Update state if it is currently loaded profile
-    if (emailSetupPendingProfile === activeProfile) {
-      setMetadata(prev => ({
-        ...prev,
-        scrEmailRecipient: inputEmail
-      }));
-    }
-
-    const pName = emailSetupPendingProfile;
-    setEmailSetupPendingProfile(null);
-    setEmailSetupInput('');
-    setEmailSetupError('');
-
-    // If "Link" action, complete the profile switch / load!
-    if (isLinkAction) {
-      executeSwitchProfile(pName);
+    try {
+      const res = await googleSignIn();
+      return res ? res.accessToken : null;
+    } catch (e: any) {
+      console.error("Drive login failed:", e);
+      alert("Google Sign-In failed. Please authorize to access your Google Drive.");
+      return null;
     }
   };
 
+  const backupToGoogleDrive = async () => {
+    setIsDriveBackingUp(true);
+    try {
+      const token = await ensureDriveAuth();
+      if (!token) return;
+
+      const payload = {
+        version: "1.0",
+        metadata,
+        activities,
+        movements,
+        officesDb,
+        attachedOffice
+      };
+      const jsonStr = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const fileName = `DiaryFlow_Backup_${metadata.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+
+      const folderId = await getOrCreateFolder(token, "DiaryFlow");
+      await uploadFileToGoogleDrive(token, fileName, "application/json", blob, folderId);
+
+      setConfirmModal({
+        title: "Backup Complete!",
+        message: `Successfully backed up your work to Google Drive as "${fileName}" inside the "DiaryFlow" folder!`,
+        confirmText: "Great",
+        accentColor: "emerald",
+        onConfirm: () => setConfirmModal(null)
+      });
+    } catch (e: any) {
+      console.error("Error backing up to Google Drive:", e);
+      alert("Error backing up to Google Drive: " + e.message);
+    } finally {
+      setIsDriveBackingUp(false);
+    }
+  };
+
+  const restoreFromGoogleDrive = async () => {
+    setIsDriveRestoring(true);
+    try {
+      const token = await ensureDriveAuth();
+      if (!token) return;
+
+      const folderId = await getOrCreateFolder(token, "DiaryFlow");
+      const files = await listBackupFiles(token, folderId);
+
+      if (files.length === 0) {
+        setConfirmModal({
+          title: "No Backups Found",
+          message: "We couldn't find any JSON backups in your Google Drive 'DiaryFlow' folder. Make sure you've backed up first!",
+          confirmText: "Close",
+          accentColor: "rose",
+          onConfirm: () => setConfirmModal(null)
+        });
+        return;
+      }
+
+      setDriveBackups(files);
+    } catch (e: any) {
+      console.error("Error fetching backups from Google Drive:", e);
+      alert("Error listing backups: " + e.message);
+    } finally {
+      setIsDriveRestoring(false);
+    }
+  };
+
+  const handleApplyDriveBackup = async (fileId: string, fileName: string) => {
+    try {
+      const token = await ensureDriveAuth();
+      if (!token) return;
+
+      const content = await downloadFileContent(token, fileId);
+      const parsed = JSON.parse(content);
+
+      if (!parsed.activities && !parsed.metadata) {
+        throw new Error("Invalid sync file format.");
+      }
+
+      setConfirmModal({
+        title: "Restore from Google Drive",
+        message: `Are you sure you want to restore the backup file "${fileName}" containing ${parsed.activities?.length || 0} entries? This will overwrite your existing local data on this browser.`,
+        confirmText: "Yes, Restore Backup",
+        cancelText: "Cancel",
+        accentColor: "blue",
+        onConfirm: () => {
+          if (parsed.metadata) setMetadata(parsed.metadata);
+          if (parsed.activities) setActivities(parsed.activities);
+          if (parsed.movements) setMovements(parsed.movements);
+          let finalOffices = parsed.officesDb || [];
+          if (parsed.interOfficeDb) {
+            finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
+          }
+          if (finalOffices.length > 0) setOfficesDb(finalOffices);
+          if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
+
+          setDriveBackups(null);
+          setConfirmModal({
+            title: "Restore Complete!",
+            message: `Successfully restored ${parsed.activities?.length || 0} diary entries, movements and configured matrix from Google Drive.`,
+            confirmText: "Done",
+            accentColor: "emerald",
+            onConfirm: () => setConfirmModal(null)
+          });
+        },
+        onCancel: () => {}
+      });
+    } catch (e: any) {
+      console.error("Error applying backup from Drive:", e);
+      alert("Error applying backup: " + e.message);
+    }
+  };
+
+  const entryActiveDay = availableDays[selectedDateIdx];
+  const entryIsSundayOrHoliday = entryActiveDay ? !!(HOLIDAYS[formatDate(entryActiveDay)] || formatDay(entryActiveDay) === 'Sunday') : false;
+  const entryShouldHideTravel = entryIsSundayOrHoliday && !workedOnHoliday;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20 font-inter text-slate-900">
@@ -3787,12 +4216,12 @@ const App: React.FC = () => {
             className={`flex items-center gap-3 p-4 rounded-2xl transition-all cursor-pointer text-left ${activeTab === 'database' ? 'bg-blue-600 text-white shadow-xl scale-[1.02]' : 'bg-transparent text-slate-600 hover:bg-slate-200/50'}`}
           >
             <div className={`p-2.5 rounded-xl ${activeTab === 'database' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
-              <Database size={18} />
+              <Settings2 size={18} />
             </div>
             <div className="min-w-0">
-              <span className="block text-xs font-black uppercase tracking-wide">6. Office Matrix</span>
+              <span className="block text-xs font-black uppercase tracking-wide">6. Settings</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
-                {officesDb.length} Offices Configured
+                Configure defaults & offices
               </span>
             </div>
           </button>
@@ -3917,28 +4346,7 @@ const App: React.FC = () => {
                <div className="space-y-3">
                   <input type="text" id="profile-name-input" placeholder="Full Name" value={metadata.name || ''} onChange={e => setMetadata({...metadata, name: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
                   <input type="text" id="profile-office-input" placeholder="Sub Division / HO (e.g. Chidambaram HO)" value={metadata.office || ''} onChange={e => setMetadata({...metadata, office: e.target.value})} className="w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 border-transparent focus:border-blue-100 transition-all" />
-                  <div>
-                    <input 
-                      type="email" 
-                      id="profile-scr-email-input" 
-                      placeholder="SCR Email Recipient (e.g. supervisor@domain.com)" 
-                      value={metadata.scrEmailRecipient || ''} 
-                      onChange={e => {
-                        const val = e.target.value;
-                        const dup = isEmailLinkedToOtherProfile(val, activeProfile, profiles);
-                        if (dup) {
-                          setProfileEmailInputError(`Mail ID already linked to profile "${dup}"`);
-                        } else {
-                          setProfileEmailInputError('');
-                        }
-                        setMetadata({...metadata, scrEmailRecipient: val});
-                      }} 
-                      className={`w-full px-4 py-3 bg-slate-50 rounded-xl text-sm font-bold outline-none focus:bg-white border-2 transition-all ${profileEmailInputError ? 'border-rose-400 focus:border-rose-400' : 'border-transparent focus:border-blue-100'}`} 
-                    />
-                    {profileEmailInputError && (
-                      <p className="text-[10px] text-rose-500 font-bold mt-1 pl-1">{profileEmailInputError}</p>
-                    )}
-                  </div>
+
                   
 
                </div>
@@ -4120,10 +4528,111 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
-
           </div>
-        </>
-      )}
+
+          {/* One-Click Cloud Sync (Between PC & Mobile) Section */}
+          <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm animate-fade-in space-y-6 text-left mt-6" id="one-click-pin-sync-section">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-4 border-b border-slate-100">
+              <div className="space-y-1">
+                <span className="inline-block bg-blue-50 text-blue-700 border border-blue-100 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 w-fit">
+                  <Cloud size={12}/> ONE-CLICK INSTANT SYNC
+                </span>
+                <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight mt-1">
+                  Sync PC & Mobile Instantly (No Login Needed)
+                </h3>
+                <p className="text-xs text-slate-500 font-semibold max-w-2xl">
+                  Transfer your entire workspace (diaries, transits, service calls, and route databases) to another device in seconds. Upload on one device, enter the 6-digit PIN on the other.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Upload Panel */}
+              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200/60 flex flex-col justify-between space-y-4">
+                <div className="space-y-2">
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider">
+                    Step 1: Upload from Source Device
+                  </span>
+                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                    Upload Current Data
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Upload your entire configuration, transit relationships, and work entries to get an instant 6-digit PIN.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={handleCloudUpload}
+                    disabled={isUploading}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 border-0"
+                  >
+                    <Cloud size={14} className={isUploading ? "animate-bounce" : ""} />
+                    {isUploading ? "Uploading Workspace..." : "📤 One-Click Upload to Cloud"}
+                  </button>
+
+                  {activeCloudPin && (
+                    <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center animate-fade-in">
+                      <span className="block text-[9px] text-emerald-800 font-black uppercase tracking-wider">YOUR ACTIVE SYNC PIN</span>
+                      <span className="block text-2xl font-mono font-black text-emerald-700 tracking-widest my-1">
+                        {activeCloudPin.slice(0,3)} {activeCloudPin.slice(3)}
+                      </span>
+                      <span className="block text-[10px] text-emerald-600 font-semibold">
+                        Enter this 6-digit code on your mobile or other device to restore!
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Download Panel */}
+              <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200/60 flex flex-col justify-between space-y-4">
+                <div className="space-y-2">
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-lg font-black uppercase tracking-wider">
+                    Step 2: Restore on Destination Device
+                  </span>
+                  <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">
+                    Restore with 6-Digit PIN
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Enter the PIN code generated from your other device to download and completely sync your workspace.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={7}
+                      placeholder="Enter 6-Digit PIN (e.g. 123 456)"
+                      value={syncPinInput}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        if (val.length <= 6) {
+                          setSyncPinInput(val);
+                        }
+                      }}
+                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-mono font-black text-slate-800 tracking-wider text-center placeholder:text-slate-400 placeholder:font-sans outline-none focus:border-blue-400 transition-all"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCloudDownload()}
+                    disabled={isDownloading || !syncPinInput}
+                    className="w-full py-3 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 border-0"
+                  >
+                    <Database size={14} className={isDownloading ? "animate-spin" : ""} />
+                    {isDownloading ? "Downloading..." : "📥 Download & Sync Device"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          </>
+        )}
 
       {activeTab === 'scr' && (
         <ServiceCallReportGenerator
@@ -4143,6 +4652,7 @@ const App: React.FC = () => {
           setSelectedHistoricalMonth={setSelectedHistoricalMonth}
           historicalMonthsList={historicalMonthsList}
           formatMMYYYY={formatMMYYYY}
+          scrDefaults={scrDefaults}
         />
       )}
 
@@ -4341,6 +4851,16 @@ const App: React.FC = () => {
                       </p>
                     </div>
                   </div>
+                ) : entryShouldHideTravel ? (
+                  <div className="p-6 bg-slate-50 border border-slate-200/60 rounded-3xl text-center space-y-2 flex flex-col items-center justify-center animate-fade-in">
+                    <span className="text-2xl">🛌</span>
+                    <div>
+                      <h4 className="font-extrabold text-[11px] text-slate-500 uppercase tracking-widest">Rest Day / Holiday</h4>
+                      <p className="text-[10px] text-slate-400 mt-1 font-semibold">
+                        Primary transport is hidden for rest days. Mark "I worked on this day" above to enable.
+                      </p>
+                    </div>
+                  </div>
                 ) : (
                   <div>
                     <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">3. Primary Transport</label>
@@ -4373,6 +4893,14 @@ const App: React.FC = () => {
                           ⚠️ Exceeds 200 km limit
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={runBikeOptimizer}
+                        className="mt-2 w-full py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-[10px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all hover:shadow-md flex items-center justify-center gap-1.5 border-0"
+                      >
+                        <Zap size={12} className="animate-pulse" />
+                        <span>Optimize Bike KM (Target 200 km)</span>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -4381,7 +4909,7 @@ const App: React.FC = () => {
               <div className="space-y-6 lg:col-span-7 flex flex-col justify-between text-left">
                  <div>
                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">4. Sequential Visits</label>
-                   {(() => {
+                   {!entryShouldHideTravel && (() => {
                      const activeDay = availableDays[selectedDateIdx];
                      if (!activeDay) return null;
                      
@@ -4442,7 +4970,17 @@ const App: React.FC = () => {
                       <div>
                         <p className="text-xs text-slate-500 font-extrabold uppercase tracking-widest">No Visits During Leave</p>
                         <p className="text-[10px] text-slate-400 max-w-[220px] mx-auto mt-2 leading-relaxed">
-                          Click <strong>Save Entry & Next Date</strong> to register your leave state.
+                          Click <strong>Save & Next Date</strong> to register your leave state.
+                        </p>
+                      </div>
+                    </div>
+                 ) : entryShouldHideTravel ? (
+                    <div className="p-10 bg-slate-50 rounded-3xl border border-slate-100/80 text-center flex flex-col items-center justify-center space-y-3 min-h-[300px] animate-fade-in">
+                      <span className="text-4xl">🏖️</span>
+                      <div>
+                        <p className="text-xs text-slate-500 font-extrabold uppercase tracking-widest">No Office Visited Needed</p>
+                        <p className="text-[10px] text-slate-400 max-w-[220px] mx-auto mt-2 leading-relaxed">
+                          This Sunday/Holiday is a rest day. Click <strong>Save & Next Date</strong> to continue.
                         </p>
                       </div>
                     </div>
@@ -4460,7 +4998,7 @@ const App: React.FC = () => {
                                 value={v.officeName} 
                                 onFocus={() => setActiveDropdownId(v.id)}
                                 onChange={e => {
-                                  const updated = visits.map(vx => vx.id === v.id ? {...vx, officeName: e.target.value} : vx);
+                                  const updated = visits.map(vx => vx.id === v.id ? {...vx, officeName: e.target.value, isManualTime: false} : vx);
                                   setVisits(recalculateVisitsSequence(updated));
                                   setActiveDropdownId(v.id);
                                 }} 
@@ -4498,7 +5036,7 @@ const App: React.FC = () => {
                                       key={name}
                                       type="button"
                                       onClick={() => {
-                                        const updated = visits.map(vx => vx.id === v.id ? {...vx, officeName: name} : vx);
+                                        const updated = visits.map(vx => vx.id === v.id ? {...vx, officeName: name, isManualTime: false} : vx);
                                         setVisits(recalculateVisitsSequence(updated));
                                         setActiveDropdownId(null);
                                       }}
@@ -4523,7 +5061,7 @@ const App: React.FC = () => {
                                     if (vx.id === v.id) {
                                       const prevDuration = Math.max(10, timeToMinutes(vx.endTime) - timeToMinutes(vx.startTime));
                                       const newEnd = addMinutesToTime(newStart, prevDuration);
-                                      return { ...vx, startTime: newStart, endTime: newEnd };
+                                      return { ...vx, startTime: newStart, endTime: newEnd, isManualTime: true };
                                     }
                                     return vx;
                                   });
@@ -4538,7 +5076,7 @@ const App: React.FC = () => {
                                 type="time" 
                                 value={v.endTime} 
                                 onChange={e => {
-                                  const updated = visits.map(vx => vx.id === v.id ? {...vx, endTime: e.target.value} : vx);
+                                  const updated = visits.map(vx => vx.id === v.id ? {...vx, endTime: e.target.value, isManualTime: true} : vx);
                                   setVisits(recalculateVisitsSequence(updated));
                                 }} 
                                 className="w-full bg-white border border-slate-200 px-3 py-2.5 text-xs font-bold rounded-xl outline-none" 
@@ -4579,13 +5117,37 @@ const App: React.FC = () => {
                  </div>
                  )}
 
-                 <div className="pt-4 border-t border-slate-150 mt-6 shrink-0">
+                 <div className="pt-4 border-t border-slate-150 mt-6 shrink-0 flex gap-3">
+                    <button 
+                       type="button"
+                       onClick={() => {
+                         const day = availableDays[selectedDateIdx];
+                         const dateStr = formatDate(day);
+                         
+                         const saved = activities.find(a => a.date === dateStr);
+                          if (saved) {
+                            setTransportMode(saved.transportMode || "Bus");
+                            setVisits(saved.visits || []);
+                            setLeaveType(saved.leaveType || "");
+                            setWorkedOnHoliday(!!saved.workedOnHoliday);
+                          } else {
+                            setVisits([{ id: Math.random().toString(36).substr(2, 5), officeName: attachedOffice, startTime: "09:00", endTime: "17:00", issues: "", resolution: "" }]);
+                            setTransportMode("Bus");
+                            setLeaveType("");
+                            setWorkedOnHoliday(false);
+                          }
+                       }}
+                       className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest transition-all cursor-pointer border-0 flex items-center justify-center gap-2 active:scale-95"
+                       title="Discard changes and revert to last saved state"
+                    >
+                       <X size={16}/> Cancel
+                    </button>
                     <button 
                        id="save-entry-btn"
                        onClick={handleSaveDay}
-                       className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border-0"
+                       className="flex-[2] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border-0"
                     >
-                      <Save size={16}/> Save Entry & Next Date
+                      <Save size={16}/> Save & Next Date
                     </button>
                  </div>
               </div>
@@ -4841,10 +5403,10 @@ const App: React.FC = () => {
 
         {activeTab === 'database' && (
           <section className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden animate-fade-in" id="database-tab-content">
-            <div className="p-8 border-b bg-slate-50/50">
-              <h2 className="text-xl font-black text-slate-800 text-left">Office & Distance Route Database</h2>
-              <p className="text-xs text-slate-400 mt-1 font-semibold text-left">
-                Configure custom offices, distances (KM) and durations (Mins) relative to <span className="text-blue-600 font-extrabold">{attachedOffice}</span>.
+            <div className="p-8 border-b bg-slate-50/50 text-left">
+              <h2 className="text-xl font-black text-slate-800">Application & Database Settings</h2>
+              <p className="text-xs text-slate-400 mt-1 font-semibold">
+                Manage your defaulted items, attached (home) office, and custom office matrix database.
               </p>
             </div>
 
@@ -4879,6 +5441,98 @@ const App: React.FC = () => {
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>
+                </div>
+              </div>
+            </div>
+
+            {/* SCR Creator Default Settings */}
+            <div className="p-8 border-b border-indigo-100/70 bg-indigo-50/15">
+              <div className="bg-white p-6 rounded-3xl border border-indigo-100 shadow-sm space-y-6">
+                <div className="flex items-start gap-4 text-left border-b border-indigo-55 pb-4">
+                  <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-md shadow-indigo-200 shrink-0">
+                    <Sliders size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">SCR Creator Default Settings</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Set default values for the Service Call Report (SCR) Creator. These values are automatically pre-filled when creating new reports.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
+                  <div>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Division Name</label>
+                    <input
+                      type="text"
+                      value={scrDefaults.divisionName}
+                      onChange={(e) => setScrDefaults(prev => ({ ...prev, divisionName: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Call Given By</label>
+                    <input
+                      type="text"
+                      value={scrDefaults.callGivenBy}
+                      onChange={(e) => setScrDefaults(prev => ({ ...prev, callGivenBy: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Time In</label>
+                      <input
+                        type="text"
+                        placeholder="09:00 hrs"
+                        value={scrDefaults.timeIn}
+                        onChange={(e) => setScrDefaults(prev => ({ ...prev, timeIn: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Time Out</label>
+                      <input
+                        type="text"
+                        placeholder="17:00 hrs"
+                        value={scrDefaults.timeOut}
+                        onChange={(e) => setScrDefaults(prev => ({ ...prev, timeOut: e.target.value }))}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Replacement of Spares</label>
+                    <input
+                      type="text"
+                      value={scrDefaults.replacementOfSpares}
+                      onChange={(e) => setScrDefaults(prev => ({ ...prev, replacementOfSpares: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Amount of Spares</label>
+                    <input
+                      type="text"
+                      value={scrDefaults.amountOfSpares}
+                      onChange={(e) => setScrDefaults(prev => ({ ...prev, amountOfSpares: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Default Other Issues</label>
+                    <input
+                      type="text"
+                      value={scrDefaults.otherIssues}
+                      onChange={(e) => setScrDefaults(prev => ({ ...prev, otherIssues: e.target.value }))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -5874,17 +6528,7 @@ const App: React.FC = () => {
                     dName = activeProfile;
                   }
 
-                  // 1. Get current preserved email if any
-                  const emailKey = activeProfile === "Karikalvalavan R" ? "diary_metadata" : `diary_profile_${activeProfile}_metadata`;
-                  const savedMeta = localStorage.getItem(emailKey);
-                  let preservedEmail = '';
-                  if (savedMeta) {
-                    try {
-                      preservedEmail = JSON.parse(savedMeta).scrEmailRecipient || '';
-                    } catch {}
-                  }
-
-                  // 2. Purge keys using helper (keeps the profile, preserves email)
+                  // 2. Purge keys using helper (keeps the profile)
                   purgeKeysForProfile(activeProfile, true);
 
                   // 3. Update React states
@@ -5896,8 +6540,7 @@ const App: React.FC = () => {
                     submissionPlace: dOffice,
                     month: currentMonth,
                     year: currentYear,
-                    fortnight: currentFortnight,
-                    scrEmailRecipient: preservedEmail
+                    fortnight: currentFortnight
                   });
                   setActivities([]);
                   setMovements([]);
@@ -5986,6 +6629,190 @@ const App: React.FC = () => {
           </div>
          </div>
        )}
+
+      {optimizationResult && (
+        <div id="bike-optimizer-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setOptimizationResult(null)}>
+          <div className="bg-white rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-5 relative animate-fade-in" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setOptimizationResult(null)}
+              className="absolute top-6 right-6 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer flex items-center justify-center"
+              title="Close Dialog"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-4 text-left">
+              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+                <Bike size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">🚴 Bike Mileage Optimizer</h3>
+                <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest mt-0.5">Target: 200 km limit optimizer</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-3 text-left">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-500">Proposed Total Bike KM:</span>
+                <span className={`font-black text-sm ${optimizationResult.insufficient ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {optimizationResult.totalKM.toFixed(1)} km
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs border-t border-slate-200/50 pt-2">
+                <span className="font-semibold text-slate-500">Days set to BIKE mode:</span>
+                <span className="font-black text-slate-700">
+                  {optimizationResult.selectedIds.length} of {optimizationResult.candidates.length} days
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium leading-normal">
+                {optimizationResult.message}
+              </p>
+            </div>
+
+            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider text-left mb-1">Proposed Day-by-Day Configuration</p>
+              {optimizationResult.candidates.map((c: any) => {
+                const isBike = optimizationResult.selectedIds.includes(c.id);
+                return (
+                  <div key={c.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl hover:border-slate-200 transition-all text-xs">
+                    <div className="text-left">
+                      <span className="font-black text-slate-700">{c.date}</span>
+                      <span className="block text-[10px] text-slate-400 font-semibold truncate max-w-[240px]">
+                        {c.originalAct.visits.map((v: any) => v.officeName).join(' ➜ ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="block text-[10px] font-black text-slate-500">
+                          {isBike ? `${c.bikeKM.toFixed(1)} km` : `${c.busKM.toFixed(1)} km`}
+                        </span>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
+                        isBike 
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                          : 'bg-slate-100 text-slate-500 border border-slate-200/50'
+                      }`}>
+                        {isBike ? '🚴 BIKE' : '🚌 BUS'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setOptimizationResult(null)}
+                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all border-0 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => applyBikeOptimization(optimizationResult.selectedIds, optimizationResult.candidates)}
+                className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 border-0 cursor-pointer"
+              >
+                Apply Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {syncConflict && (
+        <div id="sync-conflict-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-4 text-left">
+              <div className="p-3.5 bg-amber-50 text-amber-600 rounded-2xl shrink-0">
+                <AlertCircle size={28} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-black text-slate-800 tracking-tight uppercase">
+                  Sync Conflict Detected! ⚠️
+                </h3>
+                <span className="inline-block bg-amber-50 text-amber-700 border border-amber-100 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest">
+                  Overwriting Blocked to Prevent Data Loss
+                </span>
+                <p className="text-slate-500 text-xs font-semibold leading-relaxed pt-2">
+                  Another device (<strong>{syncConflict.cloudDevice}</strong>) has uploaded newer diary entries to the cloud since this device was last synchronized.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 text-left space-y-3">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-bold">Cloud version timestamp:</span>
+                <span className="text-slate-800 font-extrabold font-mono">
+                  {new Date(syncConflict.cloudUpdatedAt).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-bold">Cloud source device:</span>
+                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-black uppercase text-[8px] tracking-wider">
+                  {syncConflict.cloudDevice}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 font-semibold text-left">
+              To keep your diaries aligned across mobile and PC, please select the appropriate resolution action below:
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => resolveSyncConflictWithDownload(syncConflict.cloudPayload, syncConflict.cloudUpdatedAt)}
+                className="w-full text-left p-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 hover:border-emerald-300 rounded-2xl transition-all flex items-start gap-3 group cursor-pointer"
+              >
+                <div className="p-2 bg-emerald-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0">
+                  <Cloud size={16} />
+                </div>
+                <div>
+                  <span className="block text-xs font-black text-emerald-900 uppercase tracking-wide">
+                    📥 Pull Newer Cloud Work (Highly Recommended)
+                  </span>
+                  <span className="block text-[10px] text-emerald-700 font-semibold mt-0.5">
+                    Overwrite this device's local entries with the newer data from {syncConflict.cloudDevice}.
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm("⚠️ WARNING: This will overwrite the newer cloud data permanently with this device's outdated/local state. Are you sure you want to proceed?")) {
+                    resolveSyncConflictWithForceOverwrite();
+                  }
+                }}
+                className="w-full text-left p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl transition-all flex items-start gap-3 group cursor-pointer"
+              >
+                <div className="p-2 bg-slate-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0">
+                  <Database size={16} />
+                </div>
+                <div>
+                  <span className="block text-xs font-black text-slate-800 uppercase tracking-wide">
+                    📤 Force Overwrite Cloud with Local Data
+                  </span>
+                  <span className="block text-[10px] text-slate-500 font-semibold mt-0.5">
+                    Discard the cloud's newer changes and keep this device's state as the primary version.
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSyncConflict(null)}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-0 cursor-pointer"
+              >
+                Decide Later / Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showTABillModal && (
         <div id="ta-bill-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowTABillModal(false)}>
@@ -6383,91 +7210,7 @@ const App: React.FC = () => {
 
 
 
-      {/* SCR EMAIL SETUP MODAL */}
-      {emailSetupPendingProfile && (
-        <div id="profile-email-setup-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl border border-slate-100 space-y-5 relative animate-fade-in" onClick={e => e.stopPropagation()}>
-            <button 
-              onClick={() => {
-                setEmailSetupDismissed(true);
-                setEmailSetupPendingProfile(null);
-                setEmailSetupInput('');
-                setEmailSetupError('');
-              }}
-              className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-full transition-all border-0 bg-transparent cursor-pointer flex items-center justify-center"
-              title="Close"
-              type="button"
-            >
-              <X size={18} />
-            </button>
 
-            <div className="flex items-center gap-4 text-left pr-8">
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                <User size={24} />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-slate-800 tracking-tight">Link SCR Email</h3>
-                <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest mt-0.5">Profile Identity Registration</p>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-500 font-semibold leading-relaxed text-left">
-              To send Service Call Reports (SCR) for the profile <strong className="text-slate-800">"{emailSetupPendingProfile}"</strong>, enter a recipient email address. 
-              <br />
-              <strong className="text-indigo-600">Note: Each profile must have a completely unique email address.</strong> You cannot use a mail ID linked with another profile.
-            </p>
-
-            <form onSubmit={(e) => { e.preventDefault(); handleEmailSetupSubmit(e, true); }} className="space-y-4 text-left">
-              {emailSetupError && (
-                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-[11px] text-rose-600 font-bold">
-                  ⚠️ {emailSetupError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Recipient Mail ID for SCR</label>
-                <input
-                  required
-                  type="email"
-                  placeholder="e.g. supervisor@domain.com"
-                  value={emailSetupInput}
-                  onChange={(e) => setEmailSetupInput(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-indigo-300 focus:bg-white"
-                />
-              </div>
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmailSetupDismissed(true);
-                    setEmailSetupPendingProfile(null);
-                    setEmailSetupInput('');
-                    setEmailSetupError('');
-                  }}
-                  className="flex-1 py-3 px-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer border-0 text-center active:scale-95"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEmailSetupSubmit(undefined, false)}
-                  className="flex-1 py-3 px-2 bg-slate-700 hover:bg-slate-800 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer border-0 text-center active:scale-95"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEmailSetupSubmit(undefined, true)}
-                  className="flex-1 py-3 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[11px] uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-indigo-100 border-0 text-center active:scale-95"
-                >
-                  Link
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
 
     </div>

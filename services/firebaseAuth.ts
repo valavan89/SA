@@ -6,9 +6,9 @@ import firebaseConfig from '../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// Provider with Gmail scopes
+// Provider with Drive scopes
 const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/gmail.send');
+provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/userinfo.email');
 
 let isSigningIn = false;
@@ -49,7 +49,7 @@ export const googleSignIn = async (emailHint?: string): Promise<{ user: User; ac
   try {
     isSigningIn = true;
     const dynamicProvider = new GoogleAuthProvider();
-    dynamicProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+    dynamicProvider.addScope('https://www.googleapis.com/auth/drive.file');
     dynamicProvider.addScope('https://www.googleapis.com/auth/userinfo.email');
 
     // Use login_hint to bypass Google's Account Chooser screen

@@ -6,6 +6,7 @@ export interface OfficeVisit {
   endTime: string;
   issues: string;
   resolution: 'Resolved' | 'Not Resolved' | '';
+  isManualTime?: boolean;
 }
 
 export interface ActivityEntry {
@@ -42,7 +43,6 @@ export interface DiaryMetadata {
   month: number; // 0-11
   year: number;
   fortnight: 'first' | 'second'; // 1-15 or 16-end
-  scrEmailRecipient?: string;
 }
 
 export interface OfficeDatabaseEntry {

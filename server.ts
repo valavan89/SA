@@ -9,6 +9,29 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+// Explicit routes to serve PWA static assets from the root directory
+app.get("/manifest.json", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "manifest.json"));
+});
+
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Service-Worker-Allowed", "/");
+  res.sendFile(path.join(process.cwd(), "sw.js"));
+});
+
+app.get("/logo.png", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "logo.png"));
+});
+
+app.get("/screenshot_mobile.jpg", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "screenshot_mobile.jpg"));
+});
+
+app.get("/screenshot_desktop.jpg", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "screenshot_desktop.jpg"));
+});
+
 // Synchronized local sync store file
 const STORE_FILE = path.join(process.cwd(), "sync-store.json");
 
@@ -285,6 +308,30 @@ app.post("/api/web-storage/save", (req, res) => {
       // Verify passcode
       if (account.passcode !== cleanPasscode) {
         return res.status(401).json({ success: false, message: "Incorrect passcode. Server backup rejected." });
+      }
+
+      // Conflict Prevention / MVCC check
+      const { previousCloudUpdatedAt, force } = req.body;
+      if (account.payload && account.updatedAt && !force) {
+        const clientPrevTime = previousCloudUpdatedAt ? parseInt(previousCloudUpdatedAt, 10) : 0;
+        const serverCurrentTime = parseInt(account.updatedAt as any, 10);
+        
+        // If server data has been updated after the client's last fetched/synced version,
+        // and the payloads are not identical, trigger conflict.
+        if (serverCurrentTime > clientPrevTime) {
+          const isIdentical = JSON.stringify(account.payload) === JSON.stringify(payload);
+          if (!isIdentical) {
+            console.log(`[Web Sync] Conflict detected for ${email}. Server time: ${serverCurrentTime}, Client's assumed time: ${clientPrevTime}`);
+            return res.status(409).json({
+              success: false,
+              conflict: true,
+              message: "Sync Conflict Detected! Newer data exists in the cloud.",
+              cloudPayload: account.payload,
+              cloudUpdatedAt: account.updatedAt,
+              cloudDevice: account.device || "Other Device"
+            });
+          }
+        }
       }
       
       // Keep up to 5 rolling historical backups before overwriting active payload

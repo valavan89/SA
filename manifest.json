@@ -1,18 +1,85 @@
 {
+  "id": "/?pwa=true",
   "short_name": "DiaryFlow",
   "name": "Work Diary & Movement Tracker",
   "description": "Professional tool to generate structured fortnightly work diaries and transport route logs.",
-  "icons": [
-    {
-      "src": "/logo.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "any maskable"
-    }
-  ],
+  "lang": "en-US",
+  "dir": "ltr",
+  "scope": "/",
   "start_url": "/?pwa=true",
   "background_color": "#f8fafc",
   "theme_color": "#2563eb",
   "display": "standalone",
-  "orientation": "any"
+  "orientation": "portrait",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "display_override": [
+    "standalone",
+    "window-controls-overlay"
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Entry",
+      "short_name": "New Entry",
+      "description": "Create a new diary entry",
+      "url": "/?tab=entry",
+      "icons": [{ "src": "/logo.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "View Diary",
+      "short_name": "Diary",
+      "description": "View all diary records",
+      "url": "/?tab=records",
+      "icons": [{ "src": "/logo.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot_mobile.jpg",
+      "sizes": "1080x1920",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Work Entry Form"
+    },
+    {
+      "src": "/screenshot_desktop.jpg",
+      "sizes": "1920x1080",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Records Dashboard"
+    }
+  ]
 }
