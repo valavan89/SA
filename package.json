@@ -1,12 +1,31 @@
 {
   "name": "work-diary-&-movement-tracker",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "main": "electron-main.cjs",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs"
+    "start": "node dist/server.cjs",
+    "desktop": "electron .",
+    "make-exe": "electron-builder --win",
+    "lint": "tsc"
+  },
+  "build": {
+    "appId": "com.sadiary.tracker",
+    "productName": "SA_Diary_Tracker",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.cjs",
+      "logo-sa-diary-512.png"
+    ],
+    "win": {
+      "target": ["nsis", "portable"]
+    }
   },
   "dependencies": {
     "date-fns": "4.1.0",
@@ -14,6 +33,7 @@
     "esbuild": "^0.28.0",
     "express": "^5.2.1",
     "firebase": "^12.14.0",
+    "jszip": "^3.10.1",
     "lucide-react": "0.463.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
@@ -23,6 +43,9 @@
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "sharp": "^0.35.3",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

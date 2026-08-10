@@ -147,12 +147,12 @@ const hrsToTimeValue = (str: string) => {
 
 const timeValueToHrs = (str: string) => {
   if (!str) return '';
-  return `${str} hrs`;
+  return `${str} hrs.`;
 };
 
 const timeToMinutes = (str: string): number => {
   if (!str) return 0;
-  const cleaned = str.replace(/hrs/gi, '').trim();
+  const cleaned = str.replace(/hrs\.?/gi, '').trim();
   const matched = cleaned.match(/(\d{2})[:.](\d{2})/);
   if (matched) {
     return parseInt(matched[1], 10) * 60 + parseInt(matched[2], 10);
@@ -167,7 +167,7 @@ const timeToMinutes = (str: string): number => {
 const minutesToTimeStr = (minutes: number): string => {
   const h = Math.floor(minutes / 60) % 24;
   const m = minutes % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} hrs`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} hrs.`;
 };
 
 const getTravelMinutes = (
@@ -230,6 +230,7 @@ const getTravelMinutes = (
 
 interface ServiceCallReportGeneratorProps {
   metadata: DiaryMetadata;
+  setMetadata?: React.Dispatch<React.SetStateAction<DiaryMetadata>>;
   attachedOffice: string;
   activeProfile: string;
   uniqueOfficesList: string[];
@@ -258,6 +259,7 @@ interface ServiceCallReportGeneratorProps {
 
 export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProps> = ({
   metadata,
+  setMetadata,
   attachedOffice,
   activeProfile,
   uniqueOfficesList,
@@ -294,8 +296,8 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       officeAttended: '',
       callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: scrDefaults?.timeIn || '09:00 hrs',
-      timeOut: scrDefaults?.timeOut || '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs.',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs.',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
@@ -307,14 +309,21 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   });
 
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
-  const [draftFilterDate, setDraftFilterDate] = useState<string>(() => {
-    const today = new Date();
-    const pad = (num: number) => String(num).padStart(2, '0');
-    return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  });
+  const [draftFilterDate, setDraftFilterDate] = useState<string>('');
   const [isDateExplicitlySelected, setIsDateExplicitlySelected] = useState(false);
   const [selectedOfficeWise, setSelectedOfficeWise] = useState<string>('');
   const [viewingScDraft, setViewingScDraft] = useState<ServiceCallReport | null>(null);
+
+  // Automatically sync draftFilterDate at the end of SCR with any date selected in the SCR date option
+  useEffect(() => {
+    if (editingCall.date) {
+      const ymd = ddmmyyyyToYyyymmdd(editingCall.date);
+      if (ymd) {
+        setDraftFilterDate(ymd);
+        setIsDateExplicitlySelected(true);
+      }
+    }
+  }, [editingCall.date]);
 
   // Gmail Sending & OAuth states
   const [googleUser, setGoogleUser] = useState<any>(null);
@@ -376,25 +385,48 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     return null;
   };
 
-  const getSelectedMonthName = () => {
-    const dateObj = draftFilterDate ? new Date(draftFilterDate) : new Date();
-    return dateObj.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const [singleClickMonth, setSingleClickMonth] = useState<number>(() => (metadata.month ?? new Date().getMonth()) + 1);
+  const [singleClickYear, setSingleClickYear] = useState<number>(() => metadata.year ?? new Date().getFullYear());
+
+  useEffect(() => {
+    if (metadata.month !== undefined) {
+      setSingleClickMonth(metadata.month + 1);
+    }
+    if (metadata.year !== undefined) {
+      setSingleClickYear(metadata.year);
+    }
+  }, [metadata.month, metadata.year]);
+
+  const MONTH_NAMES_LIST = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const getSelectedMonthNameStr = () => {
+    return `${MONTH_NAMES_LIST[singleClickMonth - 1]} ${singleClickYear}`;
   };
 
-  const handleDownloadFirstFortnightly = () => {
-    const filterDateObj = draftFilterDate ? new Date(draftFilterDate) : new Date();
-    const activeYear = filterDateObj.getFullYear();
-    const activeMonth = filterDateObj.getMonth() + 1;
-
-    const items = serviceCalls.filter(sc => {
+  const firstFortnightSCRs = React.useMemo(() => {
+    return serviceCalls.filter(sc => {
       const parsed = parseSCRDate(sc.date);
-      return parsed && parsed.year === activeYear && parsed.month === activeMonth && parsed.day >= 1 && parsed.day <= 15;
+      return parsed && parsed.year === singleClickYear && parsed.month === singleClickMonth && parsed.day >= 1 && parsed.day <= 15;
     });
+  }, [serviceCalls, singleClickMonth, singleClickYear]);
+
+  const secondFortnightSCRs = React.useMemo(() => {
+    return serviceCalls.filter(sc => {
+      const parsed = parseSCRDate(sc.date);
+      return parsed && parsed.year === singleClickYear && parsed.month === singleClickMonth && parsed.day >= 16;
+    });
+  }, [serviceCalls, singleClickMonth, singleClickYear]);
+
+  const handleDownloadFirstFortnightly = () => {
+    const items = firstFortnightSCRs;
 
     if (items.length === 0) {
       setConfirmModal({
-        title: "No Drafts Found",
-        message: `There are no saved drafts for the 1st Fortnightly (1st-15th) of ${getSelectedMonthName()} to download.`,
+        title: "No SCR Drafts Found",
+        message: `There are no saved SCR drafts for the 1st Fortnight (1st-15th) of ${getSelectedMonthNameStr()} to download.`,
         confirmText: "Close",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
@@ -403,31 +435,25 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     }
 
     setConfirmModal({
-      title: "Download 1st Fortnightly",
-      message: `Do you want to download all ${items.length} report(s) from the 1st Fortnight (1st-15th) of ${getSelectedMonthName()} compiled together into a single Word Document?`,
-      confirmText: "Download",
+      title: "Download 1st Fortnight SCRs",
+      message: `Do you want to download all ${items.length} Service Call Report(s) from the 1st Fortnight (1st-15th) of ${getSelectedMonthNameStr()} compiled together into a single Word Document?`,
+      confirmText: "Download Fortnightly SCRs",
       accentColor: "indigo",
       onConfirm: () => {
         setConfirmModal(null);
-        generateMultipleServiceCallReportsDoc(metadata, attachedOffice, items);
+        const fileName = `SCR_1st_Fortnight_${singleClickMonth.toString().padStart(2, '0')}_${singleClickYear}_${activeProfile.replace(/\s+/g, '_')}.docx`;
+        generateMultipleServiceCallReportsDoc(metadata, attachedOffice, items, fileName);
       }
     });
   };
 
   const handleDownloadSecondFortnightly = () => {
-    const filterDateObj = draftFilterDate ? new Date(draftFilterDate) : new Date();
-    const activeYear = filterDateObj.getFullYear();
-    const activeMonth = filterDateObj.getMonth() + 1;
-
-    const items = serviceCalls.filter(sc => {
-      const parsed = parseSCRDate(sc.date);
-      return parsed && parsed.year === activeYear && parsed.month === activeMonth && parsed.day >= 16;
-    });
+    const items = secondFortnightSCRs;
 
     if (items.length === 0) {
       setConfirmModal({
-        title: "No Drafts Found",
-        message: `There are no saved drafts for the 2nd Fortnightly (16th-End) of ${getSelectedMonthName()} to download.`,
+        title: "No SCR Drafts Found",
+        message: `There are no saved SCR drafts for the 2nd Fortnight (16th-End) of ${getSelectedMonthNameStr()} to download.`,
         confirmText: "Close",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
@@ -436,13 +462,14 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     }
 
     setConfirmModal({
-      title: "Download 2nd Fortnightly",
-      message: `Do you want to download all ${items.length} report(s) from the 2nd Fortnight (16th-End) of ${getSelectedMonthName()} compiled together into a single Word Document?`,
-      confirmText: "Download",
+      title: "Download 2nd Fortnight SCRs",
+      message: `Do you want to download all ${items.length} Service Call Report(s) from the 2nd Fortnight (16th-End) of ${getSelectedMonthNameStr()} compiled together into a single Word Document?`,
+      confirmText: "Download Fortnightly SCRs",
       accentColor: "indigo",
       onConfirm: () => {
         setConfirmModal(null);
-        generateMultipleServiceCallReportsDoc(metadata, attachedOffice, items);
+        const fileName = `SCR_2nd_Fortnight_${singleClickMonth.toString().padStart(2, '0')}_${singleClickYear}_${activeProfile.replace(/\s+/g, '_')}.docx`;
+        generateMultipleServiceCallReportsDoc(metadata, attachedOffice, items, fileName);
       }
     });
   };
@@ -470,7 +497,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     if (items.length === 0) {
       setConfirmModal({
         title: "No Drafts Found",
-        message: `There are no saved drafts for ${office} in ${getSelectedMonthName()} to download.`,
+        message: `There are no saved drafts for ${office} in ${getSelectedMonthNameStr()} to download.`,
         confirmText: "Close",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
@@ -480,7 +507,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
     setConfirmModal({
       title: `Download SCRs for ${office}`,
-      message: `Do you want to download all ${items.length} report(s) for ${office} in ${getSelectedMonthName()} compiled together into a single Word Document?`,
+      message: `Do you want to download all ${items.length} report(s) for ${office} in ${getSelectedMonthNameStr()} compiled together into a single Word Document?`,
       confirmText: "Download",
       accentColor: "indigo",
       onConfirm: () => {
@@ -516,21 +543,26 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   };
 
   const handleOfficeChange = (office: string) => {
+    const isHO = office.toLowerCase().includes('ho') || office.toLowerCase().includes('h.o.');
+    const newCallGivenBy = (isHO ? 'PM' : 'SPM');
     const newTimeIn = getAutoTimeInForSCR(office, editingCall.date, selectedSavedId || 'temp');
     if (newTimeIn) {
-      const prevDuration = Math.max(10, timeToMinutes(editingCall.timeOut) - timeToMinutes(editingCall.timeIn));
       const newTimeInMin = timeToMinutes(newTimeIn);
-      const newTimeOut = minutesToTimeStr(newTimeInMin + prevDuration);
+      const newTimeOut = newTimeInMin < 17 * 60 
+        ? '17:00 hrs.' 
+        : minutesToTimeStr(newTimeInMin + 30);
       setEditingCall(prev => ({
         ...prev,
         officeAttended: office,
         timeIn: newTimeIn,
-        timeOut: newTimeOut
+        timeOut: newTimeOut,
+        callGivenBy: newCallGivenBy
       }));
     } else {
       setEditingCall(prev => ({
         ...prev,
-        officeAttended: office
+        officeAttended: office,
+        callGivenBy: newCallGivenBy
       }));
     }
   };
@@ -538,48 +570,49 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   const filteredCalls = React.useMemo(() => {
     const currentMonthStr = String(metadata.month + 1).padStart(2, '0');
     const currentYearStr = String(metadata.year);
+    const currentFortnight = metadata.fortnight || 'first';
 
     return serviceCalls.filter(sc => {
       if (!sc || !sc.date) return false;
       const parts = sc.date.split('.');
       if (parts.length !== 3) return false;
-      const scYear = parseInt(parts[2], 10);
-      const scMonth = parseInt(parts[1], 10) - 1; // 0-indexed
+      const scDay = parseInt(parts[0], 10);
+      const scDayStr = parts[0].padStart(2, '0');
+      const scMonthStr = parts[1].padStart(2, '0');
+      const scYearStr = parts[2];
+      const normalizedScDate = `${scDayStr}.${scMonthStr}.${scYearStr}`;
 
       // 1. If showAllMonths is active, we filter by selectedHistoricalMonth
       if (showAllMonths) {
-        const scMy = `${parts[1]}.${parts[2]}`;
+        if (!selectedHistoricalMonth) return false;
+        const scMy = `${scMonthStr}.${scYearStr}`;
         if (scMy !== selectedHistoricalMonth) return false;
 
         if (draftFilterDate) {
           const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
-          return sc.date === selectedDateDdmmyyyy;
+          return normalizedScDate === selectedDateDdmmyyyy;
         }
         return true;
       }
 
       // 2. Otherwise, we ONLY allow service calls from the current metadata month & year
-      const isCurrentMonth = parts[1] === currentMonthStr && parts[2] === currentYearStr;
+      const isCurrentMonth = scMonthStr === currentMonthStr && scYearStr === currentYearStr;
       if (!isCurrentMonth) return false;
 
-      // 3. For current month, check if it's a completed month
-      const scMonthCompleted = isMonthCompleted(scYear, scMonth, activities);
+      // 3. Fortnightly filter for current month
+      const inFortnight = currentFortnight === 'first'
+        ? (scDay >= 1 && scDay <= 15)
+        : (scDay >= 16);
+      if (!inFortnight) return false;
 
-      if (scMonthCompleted) {
-        if (draftFilterDate && isDateExplicitlySelected) {
-          const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
-          return sc.date === selectedDateDdmmyyyy;
-        }
-        return false;
-      } else {
-        if (draftFilterDate) {
-          const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
-          return sc.date === selectedDateDdmmyyyy;
-        }
-        return true;
+      // 4. Filter by date if draftFilterDate is explicitly set
+      if (draftFilterDate) {
+        const selectedDateDdmmyyyy = yyyymmddToDdmmyyyy(draftFilterDate);
+        return normalizedScDate === selectedDateDdmmyyyy;
       }
+      return true;
     });
-  }, [serviceCalls, draftFilterDate, isDateExplicitlySelected, activities, metadata.month, metadata.year, showAllMonths, selectedHistoricalMonth]);
+  }, [serviceCalls, draftFilterDate, metadata.month, metadata.year, metadata.fortnight, showAllMonths, selectedHistoricalMonth]);
 
   // Sync / Reset on profile change to prevent mixing draft IDs
   useEffect(() => {
@@ -587,15 +620,14 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const today = new Date();
     const pad = (num: number) => String(num).padStart(2, '0');
     const todayStr = `${pad(today.getDate())}.${pad(today.getMonth() + 1)}.${today.getFullYear()}`;
-    const todayYmd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-    setDraftFilterDate(todayYmd);
+    setDraftFilterDate('');
     setIsDateExplicitlySelected(false);
     setEditingCall({
       officeAttended: '',
       callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: scrDefaults?.timeIn || '09:00 hrs',
-      timeOut: scrDefaults?.timeOut || '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs.',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs.',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
@@ -619,9 +651,19 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     }
     const finalOtherIssues = !editingCall.otherIssues || !editingCall.otherIssues.trim() ? 'NIL' : editingCall.otherIssues.trim();
     const id = selectedSavedId || `sc_${Date.now()}`;
+    
+    // Normalize date string (with leading zeros for DD.MM.YYYY)
+    let formattedDate = editingCall.date;
+    const parts = editingCall.date.split('.');
+    if (parts.length === 3) {
+      formattedDate = `${parts[0].padStart(2, '0')}.${parts[1].padStart(2, '0')}.${parts[2]}`;
+    }
+
     const newCall: ServiceCallReport = {
       id,
       ...editingCall,
+      callGivenBy: (editingCall.callGivenBy || 'SPM').trim().toUpperCase(),
+      date: formattedDate,
       otherIssues: finalOtherIssues
     };
     let updated: ServiceCallReport[];
@@ -633,9 +675,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     setServiceCalls(updated);
     
     const wasEditing = !!selectedSavedId;
-    const savedDateYyyymmdd = ddmmyyyyToYyyymmdd(newCall.date);
     handleClearServiceCall();
-    setDraftFilterDate(savedDateYyyymmdd);
     
     setConfirmModal({
       title: "Report Saved",
@@ -668,13 +708,12 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
     const today = new Date();
     const pad = (num: number) => String(num).padStart(2, '0');
     const todayStr = `${pad(today.getDate())}.${pad(today.getMonth() + 1)}.${today.getFullYear()}`;
-    const todayYmd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     setEditingCall({
       officeAttended: '',
       callGivenBy: scrDefaults?.callGivenBy || 'SPM',
       date: todayStr,
-      timeIn: scrDefaults?.timeIn || '09:00 hrs',
-      timeOut: scrDefaults?.timeOut || '17:00 hrs',
+      timeIn: scrDefaults?.timeIn || '09:00 hrs.',
+      timeOut: scrDefaults?.timeOut || '17:00 hrs.',
       problems: [
         { reported: '', actionTaken: '', followUp: '' }
       ],
@@ -684,7 +723,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       divisionName: scrDefaults?.divisionName || 'Cuddalore Division'
     });
     setSelectedSavedId(null);
-    setDraftFilterDate(todayYmd);
+    setDraftFilterDate('');
   };
 
   const handleDownloadServiceCall = (call?: ServiceCallReport) => {
@@ -735,15 +774,15 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       // 2. Generate the report blob
       const { blob, fileName } = await getServiceCallReportBlob(metadata, attachedOffice, reportData);
 
-      // 3. Find or create the DiaryFlow folder in Google Drive
-      const folderId = await getOrCreateFolder(token, "DiaryFlow");
+      // 3. Find or create the SA Dairy folder in Google Drive
+      const folderId = await getOrCreateFolder(token, "SA Dairy");
 
       // 4. Upload file to Google Drive
       await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
 
       setConfirmModal({
         title: "Saved to Google Drive!",
-        message: `"${fileName}" has been successfully saved to your Google Drive in the "DiaryFlow" folder!`,
+        message: `"${fileName}" has been successfully saved to your Google Drive in the "SA Dairy" folder!`,
         confirmText: "Awesome!",
         accentColor: "emerald",
         onConfirm: () => setConfirmModal(null)
@@ -777,15 +816,15 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
       const { blob, fileName } = result;
 
-      // 3. Find or create the DiaryFlow folder in Google Drive
-      const folderId = await getOrCreateFolder(token, "DiaryFlow");
+      // 3. Find or create the SA Dairy folder in Google Drive
+      const folderId = await getOrCreateFolder(token, "SA Dairy");
 
       // 4. Upload file to Google Drive
       await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
 
       setConfirmModal({
         title: "Saved to Google Drive!",
-        message: `"${fileName}" has been successfully saved to your Google Drive in the "DiaryFlow" folder!`,
+        message: `"${fileName}" has been successfully saved to your Google Drive in the "SA Dairy" folder!`,
         confirmText: "Awesome!",
         accentColor: "emerald",
         onConfirm: () => setConfirmModal(null)
@@ -833,16 +872,40 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
   return (
     <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm animate-fade-in space-y-6 mt-8" id="service-call-section">
-      <div className="text-left space-y-1 border-b border-slate-100 pb-4">
-        <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-xl font-black text-[10px] uppercase tracking-wider border border-indigo-100">
-          📂 Word Generator
-        </span>
-        <h3 className="text-base font-black text-slate-800 uppercase tracking-tight mt-1">
-          Service Call Report Creator
-        </h3>
-        <p className="text-xs text-slate-500 font-semibold max-w-xl">
-          Name and quarters are fetched from the active profile.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4 text-left">
+        <div className="space-y-1">
+          <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-xl font-black text-[10px] uppercase tracking-wider border border-indigo-100">
+            📂 Word Generator
+          </span>
+          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight mt-1">
+            Service Call Report Creator
+          </h3>
+          <p className="text-xs text-slate-500 font-semibold max-w-xl">
+            Name and quarters are fetched from the active profile.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setConfirmModal({
+              title: "Clear Service Call Reports?",
+              message: `Are you sure you want to delete all saved Service Call Reports (${serviceCalls.length} entries) for profile "${activeProfile}"? This action cannot be undone.`,
+              confirmText: "Yes, Clear SCR Data",
+              accentColor: "rose",
+              onConfirm: () => {
+                setServiceCalls([]);
+                const keySCalls = (activeProfile === "Karikalvalavan R" || activeProfile === "Default Profile") ? "diary_service_calls" : `diary_profile_${activeProfile}_service_calls`;
+                localStorage.removeItem(keySCalls);
+                setConfirmModal(null);
+              }
+            });
+          }}
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 self-start sm:self-auto shadow-sm active:scale-95"
+          title="Clear all saved service call reports for active profile"
+        >
+          <Trash2 size={14} />
+          <span>Clear SCR Data</span>
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -859,7 +922,10 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 onChange={(e) => {
                   const formatted = yyyymmddToDdmmyyyy(e.target.value);
                   setEditingCall(prev => ({ ...prev, date: formatted }));
-                  setDraftFilterDate(e.target.value);
+                  if (e.target.value) {
+                    setDraftFilterDate(e.target.value);
+                    setIsDateExplicitlySelected(true);
+                  }
                 }}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
               />
@@ -905,7 +971,15 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                   value={hrsToTimeValue(editingCall.timeIn)}
                   onChange={(e) => {
                     const formatted = timeValueToHrs(e.target.value);
-                    setEditingCall(prev => ({ ...prev, timeIn: formatted }));
+                    const newInMin = timeToMinutes(formatted);
+                    setEditingCall(prev => {
+                      const curOutMin = timeToMinutes(prev.timeOut);
+                      let newOut = prev.timeOut;
+                      if (!prev.timeOut || curOutMin <= newInMin) {
+                        newOut = newInMin < 17 * 60 ? '17:00 hrs.' : minutesToTimeStr(newInMin + 30);
+                      }
+                      return { ...prev, timeIn: formatted, timeOut: newOut };
+                    });
                   }}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all cursor-pointer"
                 />
@@ -933,8 +1007,8 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 type="text"
                 placeholder="e.g. SPM, PM, APM..."
                 value={editingCall.callGivenBy}
-                onChange={(e) => setEditingCall(prev => ({ ...prev, callGivenBy: e.target.value }))}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all"
+                onChange={(e) => setEditingCall(prev => ({ ...prev, callGivenBy: e.target.value.toUpperCase() }))}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all uppercase font-bold"
               />
             </div>
           </div>
@@ -1087,8 +1161,8 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 disabled={!selectedOfficeWise}
                 className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all active:scale-95 shrink-0 flex items-center justify-center gap-1 ${
                   selectedOfficeWise
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer border-0'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed border-0'
                 }`}
               >
                 <span>⬇️ Download</span>
@@ -1099,6 +1173,84 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
         {/* Drafts History List (Right) */}
         <div className="lg:col-span-4 space-y-4">
+          {/* Fortnightly SCR Batch Download Box (Single Option) */}
+          <div className="bg-gradient-to-br from-indigo-900 via-blue-900 to-slate-900 text-white p-5 rounded-2xl shadow-xl space-y-3 text-left border border-indigo-700/50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300 block">Single-Click Export</span>
+                <h5 className="text-xs font-black uppercase tracking-wide text-white flex items-center gap-1.5 mt-0.5">
+                  <span>📥 Fortnightly SCR Download</span>
+                </h5>
+              </div>
+
+              {/* Month & Year Picker */}
+              <div className="flex items-center gap-1 bg-indigo-950/80 p-1 rounded-xl border border-indigo-500/30">
+                <select
+                  value={singleClickMonth}
+                  onChange={(e) => setSingleClickMonth(parseInt(e.target.value, 10))}
+                  className="bg-indigo-900/90 text-white font-black text-[10px] px-2 py-1 rounded-lg outline-none cursor-pointer border border-indigo-600/50 hover:bg-indigo-800"
+                >
+                  {MONTH_NAMES_LIST.map((mName, idx) => (
+                    <option key={mName} value={idx + 1} className="bg-slate-900 text-white font-medium">
+                      {mName}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={singleClickYear}
+                  onChange={(e) => setSingleClickYear(parseInt(e.target.value, 10))}
+                  className="bg-indigo-900/90 text-white font-black text-[10px] px-2 py-1 rounded-lg outline-none cursor-pointer border border-indigo-600/50 hover:bg-indigo-800"
+                >
+                  {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => (
+                    <option key={y} value={y} className="bg-slate-900 text-white font-medium">
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-indigo-200 font-medium leading-relaxed">
+              Compile and download all Service Call Reports for <strong className="text-white">{getSelectedMonthNameStr()}</strong> in a single Word Document (.docx).
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleDownloadFirstFortnightly}
+                className="flex flex-col items-start gap-1 p-2.5 bg-white/10 hover:bg-white/20 active:scale-95 transition-all rounded-xl border border-white/15 text-left cursor-pointer group"
+                title={`Download all 1st Fortnight SCRs for ${getSelectedMonthNameStr()} in a single Word Document`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-200 group-hover:text-white">1st Fortnight</span>
+                  <span className="text-[9px] font-extrabold bg-blue-500/40 text-blue-100 px-1.5 py-0.2 rounded-md">
+                    {firstFortnightSCRs.length} SCRs
+                  </span>
+                </div>
+                <span className="text-[10px] font-black text-white flex items-center gap-1 mt-0.5">
+                  <span>⬇️ Download (1-15)</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadSecondFortnightly}
+                className="flex flex-col items-start gap-1 p-2.5 bg-white/10 hover:bg-white/20 active:scale-95 transition-all rounded-xl border border-white/15 text-left cursor-pointer group"
+                title={`Download all 2nd Fortnight SCRs for ${getSelectedMonthNameStr()} in a single Word Document`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-200 group-hover:text-white">2nd Fortnight</span>
+                  <span className="text-[9px] font-extrabold bg-blue-500/40 text-blue-100 px-1.5 py-0.2 rounded-md">
+                    {secondFortnightSCRs.length} SCRs
+                  </span>
+                </div>
+                <span className="text-[10px] font-black text-white flex items-center gap-1 mt-0.5">
+                  <span>⬇️ Download (16-End)</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
           <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
             <div className="text-left">
               <h4 className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
@@ -1136,8 +1288,38 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 )}
               </div>
 
+              {!showAllMonths && setMetadata && (
+                <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">Reporting Fortnight</label>
+                  <div className="flex bg-slate-200/60 p-1 rounded-xl">
+                    <button 
+                      type="button"
+                      onClick={() => setMetadata(prev => ({ ...prev, fortnight: 'first' }))} 
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all border-0 cursor-pointer ${
+                        (metadata.fortnight || 'first') === 'first' 
+                          ? 'bg-white shadow-sm text-blue-600' 
+                          : 'text-slate-500 hover:text-slate-700 bg-transparent'
+                      }`}
+                    >
+                      1 - 15
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setMetadata(prev => ({ ...prev, fortnight: 'second' }))} 
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-black transition-all border-0 cursor-pointer ${
+                        metadata.fortnight === 'second' 
+                          ? 'bg-white shadow-sm text-blue-600' 
+                          : 'text-slate-500 hover:text-slate-700 bg-transparent'
+                      }`}
+                    >
+                      16 - End
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {setShowAllMonths && (
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 border-t border-slate-100 pt-1.5">
                   <button
                     type="button"
                     onClick={() => setShowAllMonths(!showAllMonths)}
@@ -1173,7 +1355,10 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                   <p className="text-[10px] text-slate-400">
                     {draftFilterDate 
                       ? `No saved drafts for this selected date (${yyyymmddToDdmmyyyy(draftFilterDate)}).`
-                      : "No active drafts found for uncompleted months."}
+                      : showAllMonths
+                        ? `No active drafts found for historical month (${formatMMYYYY(selectedHistoricalMonth)}).`
+                        : `No active drafts found for ${(metadata.fortnight || 'first') === 'first' ? '1st Fortnight (1 - 15)' : '2nd Fortnight (16 - End)'}.`
+                    }
                   </p>
                 </div>
               ) : (
@@ -1193,7 +1378,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                           </span>
                         )}
                       </div>
-                      <span className="text-xs font-black text-slate-700 block mt-1 truncate uppercase">
+                      <span className="text-xs font-black text-slate-700 block mt-1 truncate">
                         {sc.officeAttended}
                       </span>
                       <span className="text-[10px] font-bold text-slate-500 mt-0.5 block truncate">
@@ -1305,7 +1490,7 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 </div>
                 <div>
                   <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Office Attended</span>
-                  <p className="text-xs font-black text-indigo-700 mt-1 uppercase">{viewingScDraft.officeAttended}</p>
+                  <p className="text-xs font-black text-indigo-700 mt-1">{viewingScDraft.officeAttended}</p>
                 </div>
                 <div>
                   <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Call Given By</span>
@@ -1331,11 +1516,69 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
                         <div>
                           <span className="text-[9px] font-bold text-slate-400 block uppercase">Reported Issue</span>
-                          <span className="font-extrabold text-slate-700 block mt-0.5 leading-relaxed">{prob.reported || 'N/A'}</span>
+                          <div className="font-extrabold text-slate-700 block mt-0.5 leading-relaxed space-y-0.5">
+                            {prob.reported ? (
+                              prob.reported.split('\n').map((line, lIdx) => {
+                                const trimmed = line.trim();
+                                if (!trimmed) return null;
+                                let cleanLine = trimmed;
+                                while (
+                                  cleanLine.startsWith('-') ||
+                                  cleanLine.startsWith('*') ||
+                                  cleanLine.startsWith('•') ||
+                                  cleanLine.startsWith('♦') ||
+                                  cleanLine.startsWith('◆') ||
+                                  cleanLine.startsWith('◇') ||
+                                  cleanLine.startsWith('❖')
+                                ) {
+                                  cleanLine = cleanLine.substring(1).trim();
+                                }
+                                if (!cleanLine) return null;
+                                const capitalized = cleanLine.charAt(0).toUpperCase() + cleanLine.slice(1);
+                                return (
+                                  <div key={lIdx} className="flex items-start gap-1">
+                                    <span className="text-indigo-500">❖</span>
+                                    <span>{capitalized}</span>
+                                  </div>
+                                );
+                              }).filter(Boolean)
+                            ) : (
+                              'N/A'
+                            )}
+                          </div>
                         </div>
                         <div>
                           <span className="text-[9px] font-bold text-slate-400 block uppercase">Action Taken</span>
-                          <span className="font-extrabold text-slate-700 block mt-0.5 leading-relaxed">{prob.actionTaken || 'N/A'}</span>
+                          <div className="font-extrabold text-slate-700 block mt-0.5 leading-relaxed space-y-0.5">
+                            {prob.actionTaken ? (
+                              prob.actionTaken.split('\n').map((line, lIdx) => {
+                                const trimmed = line.trim();
+                                if (!trimmed) return null;
+                                let cleanLine = trimmed;
+                                while (
+                                  cleanLine.startsWith('-') ||
+                                  cleanLine.startsWith('*') ||
+                                  cleanLine.startsWith('•') ||
+                                  cleanLine.startsWith('♦') ||
+                                  cleanLine.startsWith('◆') ||
+                                  cleanLine.startsWith('◇') ||
+                                  cleanLine.startsWith('❖')
+                                ) {
+                                  cleanLine = cleanLine.substring(1).trim();
+                                }
+                                if (!cleanLine) return null;
+                                const capitalized = cleanLine.charAt(0).toUpperCase() + cleanLine.slice(1);
+                                return (
+                                  <div key={lIdx} className="flex items-start gap-1">
+                                    <span className="text-indigo-500">❖</span>
+                                    <span>{capitalized}</span>
+                                  </div>
+                                );
+                              }).filter(Boolean)
+                            ) : (
+                              'N/A'
+                            )}
+                          </div>
                         </div>
                         <div>
                           <span className="text-[9px] font-bold text-slate-400 block uppercase">Follow Up</span>

@@ -20,6 +20,30 @@ export const to24hDot = (time: string): string => {
   return time.replace(':', '.');
 };
 
+export const normalizeDateStr = (str: string): string => {
+  if (!str) return '';
+  const trimmed = str.trim();
+  if (trimmed.includes('.')) {
+    const parts = trimmed.split('.');
+    if (parts.length === 3) {
+      const d = parts[0].padStart(2, '0');
+      const m = parts[1].padStart(2, '0');
+      const y = parts[2];
+      return `${d}.${m}.${y}`;
+    }
+  }
+  if (trimmed.includes('-')) {
+    const parts = trimmed.split('-');
+    if (parts.length === 3) {
+      const y = parts[0];
+      const m = parts[1].padStart(2, '0');
+      const d = parts[2].padStart(2, '0');
+      return `${d}.${m}.${y}`;
+    }
+  }
+  return trimmed;
+};
+
 export const isMonthCompleted = (year: number, month: number, activities: any[]): boolean => {
   if (!activities || activities.length === 0) return false;
   const monthStr = String(month + 1).padStart(2, '0');

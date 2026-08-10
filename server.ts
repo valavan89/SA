@@ -9,28 +9,46 @@ const PORT = 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Explicit routes to serve PWA static assets from the root directory
-app.get("/manifest.json", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "manifest.json"));
-});
+// Helper function to serve static assets from public/, dist/, or root
+function serveStaticAsset(filename: string, res: express.Response, contentType?: string) {
+  const publicPath = path.join(process.cwd(), "public", filename);
+  const distPath = path.join(process.cwd(), "dist", filename);
+  const rootPath = path.join(process.cwd(), filename);
 
-app.get("/sw.js", (req, res) => {
-  res.setHeader("Content-Type", "application/javascript");
-  res.setHeader("Service-Worker-Allowed", "/");
-  res.sendFile(path.join(process.cwd(), "sw.js"));
-});
+  let targetPath = publicPath;
+  if (fs.existsSync(publicPath)) {
+    targetPath = publicPath;
+  } else if (fs.existsSync(distPath)) {
+    targetPath = distPath;
+  } else if (fs.existsSync(rootPath)) {
+    targetPath = rootPath;
+  }
 
-app.get("/logo.png", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "logo.png"));
-});
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  if (contentType) {
+    res.setHeader("Content-Type", contentType);
+  }
+  return res.sendFile(targetPath);
+}
 
-app.get("/screenshot_mobile.jpg", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "screenshot_mobile.jpg"));
-});
+// Explicit routes to serve PWA static assets
+app.get("/manifest.json", (req, res) => serveStaticAsset("manifest.json", res, "application/json"));
+app.get("/sw.js", (req, res) => serveStaticAsset("sw.js", res, "application/javascript"));
 
-app.get("/screenshot_desktop.jpg", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "screenshot_desktop.jpg"));
-});
+app.get("/logo.png", (req, res) => serveStaticAsset("logo.png", res, "image/png"));
+app.get("/logo-new.png", (req, res) => serveStaticAsset("logo-new.png", res, "image/png"));
+app.get("/logo-sa-diary.png", (req, res) => serveStaticAsset("logo-sa-diary.png", res, "image/png"));
+app.get("/logo-192.png", (req, res) => serveStaticAsset("logo-192.png", res, "image/png"));
+app.get("/logo-192-new.png", (req, res) => serveStaticAsset("logo-192-new.png", res, "image/png"));
+app.get("/logo-sa-diary-192.png", (req, res) => serveStaticAsset("logo-sa-diary-192.png", res, "image/png"));
+app.get("/logo-512.png", (req, res) => serveStaticAsset("logo-512.png", res, "image/png"));
+app.get("/logo-512-new.png", (req, res) => serveStaticAsset("logo-512-new.png", res, "image/png"));
+app.get("/logo-sa-diary-512.png", (req, res) => serveStaticAsset("logo-sa-diary-512.png", res, "image/png"));
+app.get("/logo-sa-diary-maskable-192.png", (req, res) => serveStaticAsset("logo-sa-diary-maskable-192.png", res, "image/png"));
+app.get("/logo-sa-diary-maskable-512.png", (req, res) => serveStaticAsset("logo-sa-diary-maskable-512.png", res, "image/png"));
+
+app.get("/screenshot_mobile.jpg", (req, res) => serveStaticAsset("screenshot_mobile.jpg", res, "image/jpeg"));
+app.get("/screenshot_desktop.jpg", (req, res) => serveStaticAsset("screenshot_desktop.jpg", res, "image/jpeg"));
 
 // Synchronized local sync store file
 const STORE_FILE = path.join(process.cwd(), "sync-store.json");

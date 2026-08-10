@@ -17,11 +17,88 @@ import {
   HeightRule,
   TableLayoutType
 } from 'docx';
-import { DiaryMetadata, ActivityEntry, MovementEntry, ServiceCallReport } from '../types';
+import { DiaryMetadata, ActivityEntry, MovementEntry, ServiceCallReport, OfficeDatabaseEntry } from '../types';
 import { getFortnightDays, formatDate, to24hDot } from '../utils/dateUtils';
+import JSZip from 'jszip';
 
-const saveAs = (blob: Blob, fileName: string) => {
-  const url = window.URL.createObjectURL(blob);
+const saveAs = async (rawBlob: Blob, fileName: string) => {
+  let finalBlob = rawBlob;
+  try {
+    const zip = new JSZip();
+    await zip.loadAsync(rawBlob);
+    
+    // 1. Process all XML files inside the document container
+    for (const filename of Object.keys(zip.files)) {
+      if (filename.endsWith('.xml')) {
+        const fileEntry = zip.file(filename);
+        if (fileEntry) {
+          let content = await fileEntry.async("string");
+          
+          // Remove Word 2010+ compatibility elements (<w:compatSetting>)
+          content = content.replace(/<w:compatSetting[^>]*\/>/g, '');
+          content = content.replace(/<w:compat>\s*<\/w:compat>/g, '');
+          
+          // Strip Word 2010/2013/2016 namespaces and attributes from standard elements
+          // This is critical because Word 2007 crashes/fails on unknown attributes in standard tags (like w15:tentative on w:lvl)
+          content = content.replace(/\s+(w14|w15|w16|w16se|w16cid|w16cex|w16sdtdh|wp14|wpc|wpg|wpi|wps|cx|cx1|cx2|cx3|cx4|cx5|cx6|cx7|cx8|aink|am3d):[a-zA-Z0-9]+=(?:"[^"]*"|'[^']*')/g, '');
+          
+          // Strip mc:Ignorable attribute completely to avoid schema errors in older Word processors
+          content = content.replace(/\s+mc:Ignorable=(?:"[^"]*"|'[^']*')/g, '');
+          
+          // Sanitize percentage widths for Word 2007 compatibility. 
+          // Word 2007 does not support percentage signs (e.g. w:w="100%") in w:tblW or w:tcW, and crashes with Unspecified error.
+          // Convert them to fiftieths of a percent integer values (e.g., 100% -> 5000, 15% -> 750).
+          content = content.replace(/w:w=(["'])([0-9.]+)%\1/g, (match, quote, p1) => {
+            const val = parseFloat(p1);
+            const calculated = Math.round(val * 50);
+            return `w:w=${quote}${calculated}${quote}`;
+          });
+          
+          zip.file(filename, content);
+        }
+      }
+    }
+
+    // 2. Ensure docProps/app.xml (Extended Properties) is fully schema-compliant.
+    // Modern docx outputs an empty <Properties /> tag which is schema-invalid and crashes Word 2007.
+    const appXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">\n' +
+      '  <Application>Microsoft Office Word</Application>\n' +
+      '  <AppVersion>12.0000</AppVersion>\n' +
+      '</Properties>';
+    zip.file('docProps/app.xml', appXml);
+
+    // 3. Remove docProps/custom.xml entirely because an empty custom properties element is schema-invalid in Word 2007.
+    zip.remove('docProps/custom.xml');
+
+    // Clean relations to custom.xml in _rels/.rels
+    const relsFile = zip.file('_rels/.rels');
+    if (relsFile) {
+      let relsXml = await relsFile.async("string");
+      relsXml = relsXml.replace(/<Relationship[^>]*Target="docProps\/custom\.xml"[^>]*\/>/g, '');
+      relsXml = relsXml.replace(/<Relationship[^>]*Target='docProps\/custom\.xml'[^>]*\/>/g, '');
+      zip.file('_rels/.rels', relsXml);
+    }
+
+    // Clean Overrides to custom.xml in [Content_Types].xml
+    const contentTypesFile = zip.file('[Content_Types].xml');
+    if (contentTypesFile) {
+      let ctXml = await contentTypesFile.async("string");
+      ctXml = ctXml.replace(/<Override[^>]*PartName="\/docProps\/custom\.xml"[^>]*\/>/g, '');
+      ctXml = ctXml.replace(/<Override[^>]*PartName='\/docProps\/custom\.xml'[^>]*\/>/g, '');
+      zip.file('[Content_Types].xml', ctXml);
+    }
+
+    // Re-generate the compatible .docx file as a Blob
+    finalBlob = await zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+  } catch (err) {
+    console.error("Error post-processing document for Word 2007 compatibility:", err);
+  }
+
+  const url = window.URL.createObjectURL(finalBlob);
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;
@@ -44,7 +121,17 @@ export const cleanText = (val: any): string => {
   if (val === null || val === undefined) {
     return "";
   }
-  const str = String(val);
+  let str = String(val);
+  
+  // Remove any XML/HTML tags (like <p>, <br/>, <xml>, etc.) to prevent Word 2007 XML parser crashes
+  str = str.replace(/<[^>]*>/g, "");
+  
+  // Replace standalone < and > with safe brackets
+  str = str.replace(/</g, "[").replace(/>/g, "]");
+  
+  // Replace ampersand to avoid broken entities or raw XML & validation errors
+  str = str.replace(/&/g, " and ");
+  
   // Matches any character outside the XML 1.0 valid range:
   // #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
   // We strip these control/invalid characters to prevent Word 2007 XML validation crash.
@@ -93,6 +180,8 @@ export const generateWordDoc = async (
   const submissionDateVal = cleanText(metadata.submissionDate);
 
   const doc = new Document({
+    compatabilityModeVersion: 12,
+    compatibility: { version: 12 },
     sections: [
       {
         properties: {
@@ -396,7 +485,9 @@ export const generateTACalculationsDoc = async (
   metadata: DiaryMetadata,
   activities: ActivityEntry[],
   movements: MovementEntry[],
-  serviceCalls?: ServiceCallReport[]
+  serviceCalls?: ServiceCallReport[],
+  attachedOffice: string = "Kurinjipadi S.O",
+  officesDb: OfficeDatabaseEntry[] = []
 ) => {
   const designation = metadata.designation || 'System Administrator';
 
@@ -460,8 +551,49 @@ export const generateTACalculationsDoc = async (
       }
     }
 
-    // Purpose of visit calculation: use details of problem reported in SCR on this date if available, or fallback to sequential office locations
+    // New 8 km rule: if all offices visited from attached office are <= 8 km, food allowance is 0
     const matchingActivity = activities.find(a => (a.date || '').trim() === uDate);
+    const visitedOffices = matchingActivity
+      ? matchingActivity.visits
+          .map(v => v.officeName)
+          .filter(name => name && name.toLowerCase().replace(/\s+/g, ' ').trim() !== attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim())
+      : [];
+
+    const visitedFromLegs = legs
+      .flatMap(l => [l.fromLocation, l.toLocation])
+      .map(loc => loc ? loc.toUpperCase().trim() : "")
+      .filter(loc => loc && loc !== attachedOffice.toUpperCase().trim() && loc !== "PANRUTI BUS STAND" && loc !== "CUDDALORE BUS STAND");
+
+    const uniqueVisited = Array.from(new Set([
+      ...visitedOffices.map(o => o.toUpperCase().trim()),
+      ...visitedFromLegs
+    ]));
+
+    if (uniqueVisited.length > 0) {
+      let anyAbove8 = false;
+      for (const offName of uniqueVisited) {
+        const cleanOffice = offName.toLowerCase().replace(/\s+/g, ' ').trim();
+        const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+        const matched = officesDb.find(o => {
+          const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+          const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+          return (fOff === cleanAttached && tOff === cleanOffice) || (fOff === cleanOffice && tOff === cleanAttached);
+        });
+        const isBike = matchingActivity?.transportMode === 'Bike';
+        const dist = matched ? (isBike ? matched.distanceBike : matched.distanceBus) : 0;
+        if (dist > 8) {
+          anyAbove8 = true;
+          break;
+        }
+      }
+      if (!anyAbove8) {
+        foodAmount = "0";
+      }
+    } else {
+      foodAmount = "0";
+    }
+
+    // Purpose of visit calculation: use details of problem reported in SCR on this date if available, or fallback to sequential office locations
     const matchingCalls = serviceCalls ? serviceCalls.filter(sc => (sc.date || '').trim() === uDate) : [];
     
     let purposeText = "";
@@ -589,6 +721,8 @@ export const generateTACalculationsDoc = async (
   };
 
   const doc = new Document({
+    compatabilityModeVersion: 12,
+    compatibility: { version: 12 },
     sections: [
       {
         properties: {
@@ -907,6 +1041,8 @@ export function toSentenceCase(text: string): string {
     .replace(/\bho\b/gi, 'HO')
     .replace(/\bso\b/gi, 'SO')
     .replace(/\bspm\b/gi, 'SPM')
+    .replace(/\bpm\b/gi, 'PM')
+    .replace(/\baspm\b/gi, 'ASPM')
     .replace(/\bbpm\b/gi, 'BPM')
     .replace(/\bnsp\b/gi, 'NSP')
     .replace(/\bpc\b/gi, 'PC')
@@ -924,9 +1060,19 @@ export function toSentenceCase(text: string): string {
     .replace(/\bfinacle\b/gi, 'Finacle');
 }
 
+export function ensureHrsDot(val: string): string {
+  const cleaned = cleanText(val || "").trim();
+  if (!cleaned) return "";
+  if (/hrs\.?$/i.test(cleaned)) {
+    return cleaned.replace(/\s*hrs\.?$/i, " hrs.");
+  }
+  return cleaned;
+}
+
 const createSpacerParagraph = (before: number, after: number) => {
   return new Paragraph({
-    spacing: { before, after }
+    spacing: { before: Math.round(before), after: Math.round(after) },
+    children: [new TextRun({ text: " ", font: "Calibri" })]
   });
 };
 
@@ -937,46 +1083,51 @@ export const compileCopyChildrenForReport = (
   report: ServiceCallReport
 ) => {
   const division = cleanText(report.divisionName || "Cuddalore Division");
-  const headerDivision = cleanText(division).replace(/\s+/g, '');
+  const headerDivision = cleanText(division);
 
   const activeProblems = (report.problems || []).filter(p => (p.reported || "").trim() || (p.actionTaken || "").trim());
-  const problemsToRender = activeProblems.length > 0 ? activeProblems : [{ reported: "", actionTaken: "", followUp: "" }];
+  
+  // Make mutable copies of problems and report fields so we can truncate them if they exceed the 1-page budget
+  const problemsToRender = activeProblems.length > 0 
+    ? activeProblems.map(p => ({ 
+        reported: p.reported || "", 
+        actionTaken: p.actionTaken || "", 
+        followUp: p.followUp || "" 
+      }))
+    : [{ reported: "", actionTaken: "", followUp: "" }];
 
-  // Calculate total lines to render in the text cells to measure data density
-  let totalLinesCount = 0;
-  problemsToRender.forEach(p => {
-    const repLines = (p.reported || "").split('\n').filter(line => line.trim()).length;
-    const actLines = (p.actionTaken || "").split('\n').filter(line => line.trim()).length;
-    const fUpLines = (p.followUp || "").split('\n').filter(line => line.trim()).length;
-    totalLinesCount += Math.max(repLines, actLines, fUpLines, 1);
-  });
+  const finalReport = {
+    ...report,
+    replacementOfSpares: report.replacementOfSpares || "",
+    amountOfSpares: report.amountOfSpares || "",
+    otherIssues: report.otherIssues || ""
+  };
 
   const lerp = (minVal: number, maxVal: number, scale: number): number => {
     return Math.round(minVal + (maxVal - minVal) * Math.min(1.2, Math.max(0, scale)));
   };
 
-  const estimateHeight = (S: number): number => {
-    const f_title1 = lerp(18, 26, S);
-    const f_title2 = lerp(14, 22, S);
-    const f_title3 = lerp(14, 24, S);
-    const f_main = lerp(13, 21, S);
+  const estimateHeightWithSpacings = (
+    scale: number,
+    s_propSpaceVertical: number,
+    s_probHeaderSpaceBeforeAfter: number,
+    s_probCellSpaceBeforeAfter: number,
+    s_signBefore: number,
+    s_signAfter: number,
+    s_pmSigSpaceBefore: number,
+    s_remarksCellSpaceBeforeAfter: number
+  ): number => {
+    const f_title1 = lerp(18, 26, scale);
+    const f_title2 = lerp(14, 22, scale);
+    const f_title3 = lerp(14, 24, scale);
+    const f_main = lerp(13, 21, scale);
     
-    const h_spaceBeforeHeader = lerp(10, 70, S);
-    const h_spaceAfterHeader = lerp(10, 50, S);
-    const h_spaceAfterSub = lerp(10, 50, S);
-    const h_spaceAfterTitle3 = lerp(20, 100, S);
+    const h_spaceBeforeHeader = lerp(10, 70, scale);
+    const h_spaceAfterHeader = lerp(10, 50, scale);
+    const h_spaceAfterSub = lerp(10, 50, scale);
+    const h_spaceAfterTitle3 = lerp(20, 100, scale);
     
-    const h_propSpaceVertical = lerp(2, 20, S);
-    const h_probHeaderSpaceBeforeAfter = lerp(10, 45, S);
-    const h_probCellSpaceBeforeAfter = lerp(1, 12, S);
-    
-    const h_signBefore = lerp(10, 40, S);
-    const h_signAfter = lerp(10, 40, S);
-    
-    const h_pmSigSpaceBefore = lerp(100, 400, S);
-    const h_remarksCellSpaceBeforeAfter = lerp(30, 160, S);
-    
-    const h_tableMarginsTopBottom = lerp(15, 60, S);
+    const h_tableMarginsTopBottom = lerp(15, 60, scale);
 
     const lineHeight = f_main * 13;
 
@@ -990,26 +1141,26 @@ export const compileCopyChildrenForReport = (
     const rawMetadata = [
       metadata.name || "",
       headquarters || "",
-      report.officeAttended || "",
-      report.callGivenBy || "",
-      report.date || "",
-      report.timeIn || "",
-      report.timeOut || ""
+      finalReport.officeAttended || "",
+      finalReport.callGivenBy || "",
+      finalReport.date || "",
+      finalReport.timeIn || "",
+      finalReport.timeOut || ""
     ];
     let table1Lines = 0;
     rawMetadata.forEach((val) => {
-      table1Lines += Math.max(1, Math.ceil(val.length / 28));
+      table1Lines += Math.max(1, Math.ceil(val.length / 45));
     });
     const heightTable1 = 
       (table1Lines * lineHeight) + 
-      (7 * 2 * h_propSpaceVertical) + 
+      (7 * 2 * s_propSpaceVertical) + 
       (7 * 2 * h_tableMarginsTopBottom);
 
-    // 3. Distance before Table 2 (empty paragraph has h_probHeaderSpaceBeforeAfter * 2 spacing + minimum line height of ~180 dxa)
-    const heightSpace2 = h_probHeaderSpaceBeforeAfter * 2 + 180;
+    // 3. Distance before Table 2 (empty paragraph has s_probHeaderSpaceBeforeAfter * 2 spacing + minimum line height of ~180 dxa)
+    const heightSpace2 = s_probHeaderSpaceBeforeAfter * 2 + 180;
 
     // 4. Table 2 height
-    const heightTable2Header = lineHeight + h_probHeaderSpaceBeforeAfter * 2;
+    const heightTable2Header = lineHeight + s_probHeaderSpaceBeforeAfter * 2;
     
     let heightTable2Rows = 0;
     problemsToRender.forEach(p => {
@@ -1019,52 +1170,52 @@ export const compileCopyChildrenForReport = (
 
       let repLinesTotalCount = 0;
       reportedLines.forEach(l => {
-        repLinesTotalCount += Math.max(1, Math.ceil(l.length / 18));
+        repLinesTotalCount += Math.max(1, Math.ceil(l.length / 32));
       });
       let actLinesTotalCount = 0;
       actionLines.forEach(l => {
-        actLinesTotalCount += Math.max(1, Math.ceil(l.length / 18));
+        actLinesTotalCount += Math.max(1, Math.ceil(l.length / 32));
       });
       let fUpLinesTotalCount = 0;
       followLines.forEach(l => {
-        fUpLinesTotalCount += Math.max(1, Math.ceil(l.length / 9));
+        fUpLinesTotalCount += Math.max(1, Math.ceil(l.length / 16));
       });
 
       const maxRowLines = Math.max(repLinesTotalCount, actLinesTotalCount, fUpLinesTotalCount, 1);
       const numParagraphs = Math.max(reportedLines.length, actionLines.length, followLines.length, 1);
       
-      heightTable2Rows += (maxRowLines * lineHeight) + (numParagraphs * 2 * h_probCellSpaceBeforeAfter);
+      heightTable2Rows += (maxRowLines * lineHeight) + (numParagraphs * 2 * s_probCellSpaceBeforeAfter);
     });
 
     const heightTable2 = heightTable2Header + heightTable2Rows + ((1 + problemsToRender.length) * 2 * h_tableMarginsTopBottom);
 
-    // 5. Space before Spares (empty paragraph has h_signBefore + h_signAfter spacing + minimum line height of ~180 dxa)
-    const heightSpaceSpares = h_signBefore + h_signAfter + 180;
+    // 5. Space before Spares (empty paragraph has s_signBefore + s_signAfter spacing + minimum line height of ~180 dxa)
+    const heightSpaceSpares = s_signBefore + s_signAfter + 180;
 
     // 6. Spares items
-    const sparesValLines = Math.max(1, Math.ceil((41 + (report.replacementOfSpares || "").length) / 45)) +
-                          Math.max(1, Math.ceil((41 + (report.amountOfSpares || "").length) / 45));
-    const heightSpares = (sparesValLines * lineHeight) + (3 * h_propSpaceVertical) + h_signAfter;
+    const sparesValLines = Math.max(1, Math.ceil((41 + (finalReport.replacementOfSpares || "").length) / 65)) +
+                          Math.max(1, Math.ceil((41 + (finalReport.amountOfSpares || "").length) / 65));
+    const heightSpares = (sparesValLines * lineHeight) + (3 * s_propSpaceVertical) + s_signAfter + (lineHeight + (2 * s_propSpaceVertical));
 
     // 7. Signature Table
-    const heightSigSM = lineHeight + h_signBefore + h_signAfter + (2 * h_tableMarginsTopBottom);
+    const heightSigSM = lineHeight + s_signBefore + s_signAfter + (2 * h_tableMarginsTopBottom);
 
-    // 8. Distance before peripherals (empty paragraph has h_signBefore + h_signAfter spacing + minimum line height of ~180 dxa)
-    const heightSpacePeriph = h_signBefore + h_signAfter + 180;
+    // 8. Distance before peripherals (empty paragraph has s_signBefore + s_signAfter spacing + minimum line height of ~180 dxa)
+    const heightSpacePeriph = s_signBefore + s_signAfter + 180;
 
     // 9. Peripherals line
-    const periphTextLines = Math.max(1, Math.ceil((49 + (report.otherIssues || "").length) / 45));
-    const heightPeriph = (periphTextLines * lineHeight) + (h_propSpaceVertical + 5) * 2;
+    const periphTextLines = Math.max(1, Math.ceil((49 + (finalReport.otherIssues || "").length) / 65));
+    const heightPeriph = (periphTextLines * lineHeight) + (s_propSpaceVertical + 5) * 2;
 
     // 10. PM Signature paragraph
-    const heightPMSig = lineHeight + h_pmSigSpaceBefore + h_signAfter;
+    const heightPMSig = lineHeight + s_pmSigSpaceBefore + s_signAfter;
 
-    // 11. Distance before Remarks (empty paragraph has h_signBefore + h_signAfter spacing + minimum line height of ~180 dxa)
-    const heightSpaceRemarks = h_signBefore + h_signAfter + 180;
+    // 11. Distance before Remarks (empty paragraph has s_signBefore + s_signAfter spacing + minimum line height of ~180 dxa)
+    const heightSpaceRemarks = s_signBefore + s_signAfter + 180;
 
     // 12. Remarks Table
-    const heightRemarksHeader = lineHeight + Math.max(15, h_remarksCellSpaceBeforeAfter / 4) * 2;
-    const heightRemarksBody = h_remarksCellSpaceBeforeAfter * 2;
+    const heightRemarksHeader = lineHeight + Math.round(Math.max(15, s_remarksCellSpaceBeforeAfter / 4)) * 2;
+    const heightRemarksBody = s_remarksCellSpaceBeforeAfter * 2;
     const heightRemarksTable = heightRemarksHeader + heightRemarksBody + (4 * h_tableMarginsTopBottom);
 
     return heightHeader + 
@@ -1081,14 +1232,93 @@ export const compileCopyChildrenForReport = (
       heightRemarksTable;
   };
 
+  const estimateHeight = (scale: number): number => {
+    return estimateHeightWithSpacings(
+      scale,
+      lerp(2, 20, scale),
+      lerp(10, 45, scale),
+      lerp(1, 12, scale),
+      lerp(10, 40, scale),
+      lerp(10, 40, scale),
+      lerp(10, 400, scale),
+      lerp(30, 160, scale)
+    );
+  };
+
   let bestScale = 1.0;
-  const targetBudget = 9800; // Force layout to fit inside single page landscape bounds while fully utilizing it
+  const targetBudget = 14200; // Portrait height budget in dxa (A4 height is 16838. Leaves solid safe padding to guarantee absolutely 1 page in Word 2007)
 
   // Linear scan to find the exact scale that sits below the target Budget
-  for (let s = 1.5; s >= 0.0; s -= 0.02) {
+  for (let s = 1.6; s >= 0.4; s -= 0.02) {
     if (estimateHeight(s) <= targetBudget) {
       bestScale = s;
       break;
+    }
+  }
+
+  // If even at s = 0.4 the layout is too tall, progressively truncate the longest text fields
+  if (estimateHeight(0.4) > targetBudget) {
+    bestScale = 0.4;
+    for (let truncateIter = 0; truncateIter < 80; truncateIter++) {
+      if (estimateHeight(0.4) <= targetBudget) {
+        break;
+      }
+      
+      // Find the longest text input and shorten it to fit under budget
+      let longestLength = 0;
+      let longestFieldType: 'reported' | 'actionTaken' | 'followUp' | 'otherIssues' | 'spares' = 'reported';
+      let targetIdx = -1;
+
+      problemsToRender.forEach((p, idx) => {
+        if (p.reported.length > longestLength) {
+          longestLength = p.reported.length;
+          longestFieldType = 'reported';
+          targetIdx = idx;
+        }
+        if (p.actionTaken.length > longestLength) {
+          longestLength = p.actionTaken.length;
+          longestFieldType = 'actionTaken';
+          targetIdx = idx;
+        }
+        if (p.followUp.length > longestLength) {
+          longestLength = p.followUp.length;
+          longestFieldType = 'followUp';
+          targetIdx = idx;
+        }
+      });
+
+      if (finalReport.otherIssues.length > longestLength) {
+        longestLength = finalReport.otherIssues.length;
+        longestFieldType = 'otherIssues';
+        targetIdx = -1;
+      }
+      if (finalReport.replacementOfSpares.length > longestLength) {
+        longestLength = finalReport.replacementOfSpares.length;
+        longestFieldType = 'spares';
+        targetIdx = -1;
+      }
+
+      if (longestLength <= 10) {
+        break; // Can't truncate any further
+      }
+
+      // Truncate the chosen field
+      if (targetIdx !== -1) {
+        const p = problemsToRender[targetIdx];
+        if ((longestFieldType as string) === 'reported') {
+          p.reported = p.reported.slice(0, Math.floor(p.reported.length * 0.85)) + "...";
+        } else if ((longestFieldType as string) === 'actionTaken') {
+          p.actionTaken = p.actionTaken.slice(0, Math.floor(p.actionTaken.length * 0.85)) + "...";
+        } else if ((longestFieldType as string) === 'followUp') {
+          p.followUp = p.followUp.slice(0, Math.floor(p.followUp.length * 0.85)) + "...";
+        }
+      } else {
+        if (longestFieldType === 'otherIssues') {
+          finalReport.otherIssues = finalReport.otherIssues.slice(0, Math.floor(finalReport.otherIssues.length * 0.85)) + "...";
+        } else if (longestFieldType === 'spares') {
+          finalReport.replacementOfSpares = finalReport.replacementOfSpares.slice(0, Math.floor(finalReport.replacementOfSpares.length * 0.85)) + "...";
+        }
+      }
     }
   }
 
@@ -1112,15 +1342,49 @@ export const compileCopyChildrenForReport = (
     right: h_tableMarginsLeftRight
   };
   
-  const propSpaceVertical = lerp(2, 20, S);
-  const probHeaderSpaceBeforeAfter = lerp(10, 45, S);
-  const probCellSpaceBeforeAfter = lerp(1, 12, S);
+  let propSpaceVertical = lerp(2, 20, S);
+  let probHeaderSpaceBeforeAfter = lerp(10, 45, S);
+  let probCellSpaceBeforeAfter = lerp(1, 12, S);
   
-  const signBefore = lerp(10, 40, S);
-  const signAfter = lerp(10, 40, S);
+  let signBefore = lerp(10, 40, S);
+  let signAfter = lerp(10, 40, S);
   
-  const pmSigSpaceBefore = lerp(100, 400, S);
-  const remarksCellSpaceBeforeAfter = lerp(30, 160, S);
+  let pmSigSpaceBefore = lerp(100, 400, S);
+  let remarksCellSpaceBeforeAfter = lerp(30, 160, S);
+
+  // Proactively expand empty spacings and signatures to completely fill the single page budget (targetBudget)
+  let currentEst = estimateHeightWithSpacings(
+    S,
+    propSpaceVertical,
+    probHeaderSpaceBeforeAfter,
+    probCellSpaceBeforeAfter,
+    signBefore,
+    signAfter,
+    pmSigSpaceBefore,
+    remarksCellSpaceBeforeAfter
+  );
+
+  for (let i = 0; i < 500; i++) {
+    if (currentEst >= targetBudget - 50) {
+      break;
+    }
+    remarksCellSpaceBeforeAfter += 2;
+    pmSigSpaceBefore += 2;
+    signBefore += 0.5;
+    signAfter += 0.5;
+    probHeaderSpaceBeforeAfter += 0.2;
+    
+    currentEst = estimateHeightWithSpacings(
+      S,
+      propSpaceVertical,
+      probHeaderSpaceBeforeAfter,
+      probCellSpaceBeforeAfter,
+      signBefore,
+      signAfter,
+      pmSigSpaceBefore,
+      remarksCellSpaceBeforeAfter
+    );
+  }
 
   return [
     new Paragraph({
@@ -1174,11 +1438,11 @@ export const compileCopyChildrenForReport = (
       rows: [
         ["Name of the System Manager", ":", cleanText(metadata.name || "")],
         ["Head Quarters", ":", cleanText(headquarters || "")],
-        ["Date", ":", cleanText(report.date || "")],
-        ["Time in", ":", cleanText(report.timeIn || "")],
-        ["Time out", ":", cleanText(report.timeOut || "")],
-        ["Name of the office attended", ":", toSentenceCase(report.officeAttended || "")],
-        ["Call given by", ":", toSentenceCase(report.callGivenBy || "")],
+        ["Date", ":", cleanText(finalReport.date || "")],
+        ["Time in", ":", ensureHrsDot(finalReport.timeIn || "")],
+        ["Time out", ":", ensureHrsDot(finalReport.timeOut || "")],
+        ["Name of the office attended", ":", cleanText(finalReport.officeAttended || "")],
+        ["Call given by", ":", (finalReport.callGivenBy ?? "").trim().toUpperCase()],
       ].map(([propName, colon, propVal]) => new TableRow({
         children: [
           new TableCell({
@@ -1291,9 +1555,21 @@ export const compileCopyChildrenForReport = (
                 const paras = p.reported.split('\n').map(line => {
                   const trimmed = line.trim();
                   if (!trimmed) return null;
-                  const sentenceCased = toSentenceCase(trimmed);
-                  const hasBullet = sentenceCased.startsWith('❖') || sentenceCased.startsWith('*') || sentenceCased.startsWith('•');
-                  const displayLine = hasBullet ? sentenceCased : `❖ ${sentenceCased}`;
+                  let cleanLine = trimmed;
+                  while (
+                    cleanLine.startsWith('-') ||
+                    cleanLine.startsWith('*') ||
+                    cleanLine.startsWith('•') ||
+                    cleanLine.startsWith('♦') ||
+                    cleanLine.startsWith('◆') ||
+                    cleanLine.startsWith('◇') ||
+                    cleanLine.startsWith('❖')
+                  ) {
+                    cleanLine = cleanLine.substring(1).trim();
+                  }
+                  if (!cleanLine) return null;
+                  const cleanVal = cleanText(cleanLine);
+                  const displayLine = `❖ ${cleanVal}`;
                   return new Paragraph({
                     spacing: { before: probCellSpaceBeforeAfter, after: probCellSpaceBeforeAfter },
                     children: [
@@ -1310,9 +1586,21 @@ export const compileCopyChildrenForReport = (
                 const paras = p.actionTaken.split('\n').map(line => {
                   const trimmed = line.trim();
                   if (!trimmed) return null;
-                  const sentenceCased = toSentenceCase(trimmed);
-                  const hasBullet = sentenceCased.startsWith('❖') || sentenceCased.startsWith('*') || sentenceCased.startsWith('•');
-                  const displayLine = hasBullet ? sentenceCased : `❖ ${sentenceCased}`;
+                  let cleanLine = trimmed;
+                  while (
+                    cleanLine.startsWith('-') ||
+                    cleanLine.startsWith('*') ||
+                    cleanLine.startsWith('•') ||
+                    cleanLine.startsWith('♦') ||
+                    cleanLine.startsWith('◆') ||
+                    cleanLine.startsWith('◇') ||
+                    cleanLine.startsWith('❖')
+                  ) {
+                    cleanLine = cleanLine.substring(1).trim();
+                  }
+                  if (!cleanLine) return null;
+                  const cleanVal = cleanText(cleanLine);
+                  const displayLine = `❖ ${cleanVal}`;
                   return new Paragraph({
                     spacing: { before: probCellSpaceBeforeAfter, after: probCellSpaceBeforeAfter },
                     children: [
@@ -1329,11 +1617,11 @@ export const compileCopyChildrenForReport = (
                 const paras = (p.followUp || "").split('\n').map(line => {
                   const trimmed = line.trim();
                   if (!trimmed) return null;
-                  const sentenceCased = toSentenceCase(trimmed);
+                  const cleanVal = cleanText(trimmed);
                   return new Paragraph({
                     spacing: { before: probCellSpaceBeforeAfter, after: probCellSpaceBeforeAfter },
                     children: [
-                      new TextRun({ text: sentenceCased, size: sizeMain, font: "Calibri" })
+                      new TextRun({ text: cleanVal, size: sizeMain, font: "Calibri" })
                     ]
                   });
                 }).filter(Boolean) as Paragraph[];
@@ -1350,15 +1638,16 @@ export const compileCopyChildrenForReport = (
     new Paragraph({
       spacing: { before: propSpaceVertical, after: propSpaceVertical },
       children: [
-        new TextRun({ text: "Replacement of spares, if any required : ", bold: true, size: sizeMain, font: "Calibri" }),
-        new TextRun({ text: toSentenceCase(report.replacementOfSpares || "None"), size: sizeMain, font: "Calibri" }),
+        new TextRun({ text: "Replacement of spares, if any required: ", bold: true, size: sizeMain, font: "Calibri" }),
+        new TextRun({ text: cleanText(finalReport.replacementOfSpares || "None"), size: sizeMain, font: "Calibri" }),
       ]
     }),
+    createSpacerParagraph(propSpaceVertical, propSpaceVertical),
     new Paragraph({
       spacing: { before: propSpaceVertical, after: signAfter },
       children: [
-        new TextRun({ text: "Amount of purchase of spare (approx) : ", bold: true, size: sizeMain, font: "Calibri" }),
-        new TextRun({ text: toSentenceCase(report.amountOfSpares || "None"), size: sizeMain, font: "Calibri" }),
+        new TextRun({ text: "Amount of purchase of spare (approx.): ", bold: true, size: sizeMain, font: "Calibri" }),
+        new TextRun({ text: cleanText(finalReport.amountOfSpares || "None"), size: sizeMain, font: "Calibri" }),
       ]
     }),
 
@@ -1402,7 +1691,7 @@ export const compileCopyChildrenForReport = (
       spacing: { before: Math.max(10, propSpaceVertical + 5), after: Math.max(10, propSpaceVertical + 5) },
       children: [
         new TextRun({ text: "All computer peripherals are working fine except: ", bold: true, size: sizeMain, font: "Calibri" }),
-        new TextRun({ text: toSentenceCase(report.otherIssues || "NSP 2"), bold: true, size: sizeMain, font: "Calibri" }),
+        new TextRun({ text: cleanText(finalReport.otherIssues || "NSP 2"), size: sizeMain, font: "Calibri" }),
       ]
     }),
 
@@ -1434,7 +1723,7 @@ export const compileCopyChildrenForReport = (
               children: [
                 new Paragraph({
                   alignment: AlignmentType.CENTER,
-                  spacing: { before: Math.max(15, remarksCellSpaceBeforeAfter / 4), after: Math.max(15, remarksCellSpaceBeforeAfter / 4) },
+                  spacing: { before: Math.round(Math.max(15, remarksCellSpaceBeforeAfter / 4)), after: Math.round(Math.max(15, remarksCellSpaceBeforeAfter / 4)) },
                   children: [
                     new TextRun({ text: "Remarks at Divisional Office", bold: true, size: sizeMain, font: "Calibri" })
                   ]
@@ -1455,7 +1744,7 @@ export const compileCopyChildrenForReport = (
         })
       ]
     }),
-    new Paragraph({})
+    new Paragraph({ spacing: { before: 10, after: 10 }, children: [new TextRun({ text: " ", font: "Calibri" })] })
   ];
 };
 
@@ -1465,55 +1754,27 @@ export const getServiceCallReportBlob = async (
   report: ServiceCallReport
 ): Promise<{ blob: Blob; fileName: string }> => {
   const doc = new Document({
+    compatabilityModeVersion: 12,
+    compatibility: { version: 12 },
     sections: [
       {
         properties: {
           page: {
-            orientation: PageOrientation.LANDSCAPE,
             size: {
-              width: 16838, // A4 landscape width (29.7 cm) in dxa
-              height: 11906, // A4 landscape height (21 cm) in dxa
+              width: 11906, // A4 portrait width (21 cm) in dxa
+              height: 16838, // A4 portrait height (29.7 cm) in dxa
+              orientation: PageOrientation.PORTRAIT,
               code: 9,       // A4 paper size code
             },
             margin: {
-              top: 250,
-              right: 400,
-              bottom: 250,
-              left: 400,
+              top: 500,
+              right: 600,
+              bottom: 500,
+              left: 600,
             },
           },
         },
-        children: [
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: {
-              top: { style: BorderStyle.NONE },
-              bottom: { style: BorderStyle.NONE },
-              left: { style: BorderStyle.NONE },
-              right: { style: BorderStyle.NONE },
-              insideHorizontal: { style: BorderStyle.NONE },
-              insideVertical: { style: BorderStyle.NONE },
-            },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({
-                    width: { size: 48, type: WidthType.PERCENTAGE },
-                    children: compileCopyChildrenForReport("ORIGINAL", metadata, headquarters, report),
-                  }),
-                  new TableCell({
-                    width: { size: 4, type: WidthType.PERCENTAGE },
-                    children: [new Paragraph({ children: [new TextRun(" ")] })],
-                  }),
-                  new TableCell({
-                    width: { size: 48, type: WidthType.PERCENTAGE },
-                    children: compileCopyChildrenForReport("DUPLICATE", metadata, headquarters, report),
-                  }),
-                ],
-              }),
-            ],
-          }),
-        ],
+        children: compileCopyChildrenForReport("ORIGINAL", metadata, headquarters, report),
       },
     ],
   });
@@ -1537,7 +1798,8 @@ export const generateServiceCallReportDoc = async (
 export const getMultipleServiceCallReportsBlob = async (
   metadata: DiaryMetadata,
   headquarters: string,
-  reports: ServiceCallReport[]
+  reports: ServiceCallReport[],
+  customFileName?: string
 ): Promise<{ blob: Blob; fileName: string } | null> => {
   if (reports.length === 0) return null;
 
@@ -1545,67 +1807,42 @@ export const getMultipleServiceCallReportsBlob = async (
     return {
       properties: {
         page: {
-          orientation: PageOrientation.LANDSCAPE,
           size: {
-            width: 16838, // A4 landscape width (29.7 cm) in dxa
-            height: 11906, // A4 landscape height (21 cm) in dxa
+            width: 11906, // A4 portrait width (21 cm) in dxa
+            height: 16838, // A4 portrait height (29.7 cm) in dxa
+            orientation: PageOrientation.PORTRAIT,
             code: 9,       // A4 paper size code
           },
           margin: {
-            top: 250,
-            right: 400,
-            bottom: 250,
-            left: 400,
+            top: 500,
+            right: 600,
+            bottom: 500,
+            left: 600,
           },
         },
       },
-      children: [
-        new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          borders: {
-            top: { style: BorderStyle.NONE },
-            bottom: { style: BorderStyle.NONE },
-            left: { style: BorderStyle.NONE },
-            right: { style: BorderStyle.NONE },
-            insideHorizontal: { style: BorderStyle.NONE },
-            insideVertical: { style: BorderStyle.NONE },
-          },
-          rows: [
-            new TableRow({
-              children: [
-                new TableCell({
-                  width: { size: 48, type: WidthType.PERCENTAGE },
-                  children: compileCopyChildrenForReport("ORIGINAL", metadata, headquarters, report),
-                }),
-                new TableCell({
-                  width: { size: 4, type: WidthType.PERCENTAGE },
-                  children: [new Paragraph({ children: [new TextRun(" ")] })],
-                }),
-                new TableCell({
-                  width: { size: 48, type: WidthType.PERCENTAGE },
-                  children: compileCopyChildrenForReport("DUPLICATE", metadata, headquarters, report),
-                }),
-              ],
-            }),
-          ],
-        }),
-      ]
+      children: compileCopyChildrenForReport("ORIGINAL", metadata, headquarters, report),
     };
   });
 
-  const doc = new Document({ sections });
+  const doc = new Document({
+    compatabilityModeVersion: 12,
+    compatibility: { version: 12 },
+    sections
+  });
   const blob = await Packer.toBlob(doc);
   const formattedDate = cleanText(reports[0].date).replace(/[\s\.]+/g, '_');
-  const fileName = `Merged_Service_Call_Reports_${formattedDate}_All.docx`;
+  const fileName = customFileName || `Merged_Service_Call_Reports_${formattedDate}_All.docx`;
   return { blob, fileName };
 };
 
 export const generateMultipleServiceCallReportsDoc = async (
   metadata: DiaryMetadata,
   headquarters: string,
-  reports: ServiceCallReport[]
+  reports: ServiceCallReport[],
+  customFileName?: string
 ) => {
-  const result = await getMultipleServiceCallReportsBlob(metadata, headquarters, reports);
+  const result = await getMultipleServiceCallReportsBlob(metadata, headquarters, reports, customFileName);
   if (result) {
     saveAs(result.blob, result.fileName);
   }
@@ -1738,7 +1975,7 @@ export const generateTABillDoc = async (
     }),
     // Header Row 3 (Numbered)
     new TableRow({
-      height: { value: 567, rule: HeightRule.AT_LEAST },
+      height: { value: 567, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: "1", size: 16, font: DEFAULT_FONT })] })] }),
         new TableCell({ children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: "2", size: 16, font: DEFAULT_FONT })] })] }),
@@ -1786,7 +2023,7 @@ export const generateTABillDoc = async (
   const table9ColWidths = [30, 30, 20, 20];
   const table9Rows = [
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({ width: { size: 30, type: WidthType.PERCENTAGE }, children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80, after: 80 }, children: [new TextRun({ text: "Period of stay (From - To)", bold: true, size: 18, font: DEFAULT_FONT })] })] }),
         new TableCell({ width: { size: 30, type: WidthType.PERCENTAGE }, children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80, after: 80 }, children: [new TextRun({ text: "Name of Hotel", bold: true, size: 18, font: DEFAULT_FONT })] })] }),
@@ -1795,7 +2032,7 @@ export const generateTABillDoc = async (
       ],
     }),
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: ["1", "2", "3", "4"].map((num, i) => new TableCell({
         width: { size: table9ColWidths[i], type: WidthType.PERCENTAGE },
         children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 50, after: 50 }, children: [new TextRun({ text: num, size: 16, font: DEFAULT_FONT })] })]
@@ -1805,7 +2042,7 @@ export const generateTABillDoc = async (
   for (let i = 0; i < 8; i++) {
     table9Rows.push(
       new TableRow({
-        height: { value: 227, rule: HeightRule.AT_LEAST },
+        height: { value: 227, rule: HeightRule.ATLEAST },
         children: table9ColWidths.map((w) => new TableCell({
           width: { size: w, type: WidthType.PERCENTAGE },
           children: [new Paragraph({ spacing: { before: 90, after: 90 }, children: [new TextRun({ text: " ", size: 16, font: DEFAULT_FONT })] })]
@@ -1819,7 +2056,7 @@ export const generateTABillDoc = async (
   const table10Rows = [
     // Row 1
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({
           width: { size: 12, type: WidthType.PERCENTAGE },
@@ -1855,7 +2092,7 @@ export const generateTABillDoc = async (
     }),
     // Row 2
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({ width: { size: 12, type: WidthType.PERCENTAGE }, verticalMerge: VerticalMergeType.CONTINUE, children: [new Paragraph({ children: [] })] }),
         new TableCell({
@@ -1874,7 +2111,7 @@ export const generateTABillDoc = async (
     }),
     // Row 3 (Numbered Row)
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: ["1", "2", "3", "4", "5", "6", "7"].map((num, i) => new TableCell({
         width: { size: table10ColWidths[i], type: WidthType.PERCENTAGE },
         children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 50, after: 50 }, children: [new TextRun({ text: num, size: 16, font: DEFAULT_FONT })] })]
@@ -1884,7 +2121,7 @@ export const generateTABillDoc = async (
   for (let i = 0; i < 7; i++) {
     table10Rows.push(
       new TableRow({
-        height: { value: 227, rule: HeightRule.AT_LEAST },
+        height: { value: 227, rule: HeightRule.ATLEAST },
         children: table10ColWidths.map((w) => new TableCell({
           width: { size: w, type: WidthType.PERCENTAGE },
           children: [new Paragraph({ spacing: { before: 90, after: 90 }, children: [new TextRun({ text: " ", size: 16, font: DEFAULT_FONT })] })]
@@ -1898,7 +2135,7 @@ export const generateTABillDoc = async (
   const table11Rows = [
     // Row 1
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({
           width: { size: 20, type: WidthType.PERCENTAGE },
@@ -1918,7 +2155,7 @@ export const generateTABillDoc = async (
     }),
     // Row 2
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: [
         new TableCell({ width: { size: 20, type: WidthType.PERCENTAGE }, verticalMerge: VerticalMergeType.CONTINUE, children: [new Paragraph({ children: [] })] }),
         new TableCell({
@@ -1937,7 +2174,7 @@ export const generateTABillDoc = async (
     }),
     // Row 3 (Numbered Row)
     new TableRow({
-      height: { value: 227, rule: HeightRule.AT_LEAST },
+      height: { value: 227, rule: HeightRule.ATLEAST },
       children: ["1", "2", "3", "4"].map((num, i) => new TableCell({
         width: { size: table11ColWidths[i], type: WidthType.PERCENTAGE },
         children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 50, after: 50 }, children: [new TextRun({ text: num, size: 16, font: DEFAULT_FONT })] })]
@@ -1947,7 +2184,7 @@ export const generateTABillDoc = async (
   for (let i = 0; i < 5; i++) {
     table11Rows.push(
       new TableRow({
-        height: { value: 227, rule: HeightRule.AT_LEAST },
+        height: { value: 227, rule: HeightRule.ATLEAST },
         children: table11ColWidths.map((w) => new TableCell({
           width: { size: w, type: WidthType.PERCENTAGE },
           children: [new Paragraph({ spacing: { before: 90, after: 90 }, children: [new TextRun({ text: " ", size: 16, font: DEFAULT_FONT })] })]
@@ -1966,11 +2203,15 @@ export const generateTABillDoc = async (
   };
 
   const doc = new Document({
+    compatabilityModeVersion: 12,
+    compatibility: { version: 12 },
     styles: {
       default: {
-        paragraph: {
-          spacing: {
-            line: 360,
+        document: {
+          paragraph: {
+            spacing: {
+              line: 360,
+            },
           },
         },
       },
