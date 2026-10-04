@@ -4,50 +4,42 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>SA Dairy</title>
+    <title>SA Diary &amp; TA movements</title>
+    <meta name="description" content="A professional tool for System Administrators and staff to generate structured fortnightly work diaries and movement logs, exportable as Microsoft Word documents." />
+    <meta property="og:title" content="SA Diary &amp; TA movements" />
+    <meta property="og:description" content="A professional tool for System Administrators and staff to generate structured fortnightly work diaries and movement logs, exportable as Microsoft Word documents." />
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SA Diary" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo-sa-diary-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/logo-sa-diary-512.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/logo-sa-diary-192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/logo-sa-diary-512.png" />
     <script>
-      if ('serviceWorker' in navigator) {
+      if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('Service Worker registered successfully!', reg.scope))
-            .catch(err => console.log('Service Worker registration failed:', err));
+            .catch(err => {
+              // Benign in cross-origin sandboxed preview iframes
+              console.debug('Service Worker skipped:', err);
+            });
         });
       }
     </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
       body {
-        font-family: 'Inter', sans-serif;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         background-color: #f8fafc;
       }
       @media print {
         .no-print {
-          display: none;
+          display: none !important;
         }
       }
     </style>
-    <script type="importmap">
-    {
-      "imports": {
-        "lucide-react": "https://esm.sh/lucide-react@0.463.0",
-        "react-dom/": "https://esm.sh/react-dom@19.0.0/",
-        "react/": "https://esm.sh/react@19.0.0/",
-        "react": "https://esm.sh/react@19.0.0",
-        "date-fns": "https://esm.sh/date-fns@4.1.0",
-        "docx": "https://esm.sh/docx@9.5.1"
-      }
-    }
-    </script>
-  <link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>

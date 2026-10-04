@@ -28,25 +28,32 @@
     }
   },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "date-fns": "4.1.0",
     "docx": "9.5.1",
     "esbuild": "^0.28.0",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "firebase": "^12.14.0",
+    "html5-qrcode": "^2.3.8",
     "jszip": "^3.10.1",
     "lucide-react": "0.463.0",
+    "qrcode": "^1.5.4",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "tsx": "^4.22.4"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "sharp": "^0.35.3",
+    "tailwindcss": "^4.3.3",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vite-plugin-pwa": "^1.3.0"
   }
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CloudDownload, Trash2, Mail, Share2 } from 'lucide-react';
-import { DiaryMetadata, ServiceCallReport, OfficeDatabaseEntry, ActivityEntry } from '../types';
-import { isMonthCompleted } from '../utils/dateUtils';
+import { DiaryMetadata, ServiceCallReport, OfficeDatabaseEntry, ActivityEntry, OfficeVisit } from '../types';
+import { isMonthCompleted, normalizeDateStr } from '../utils/dateUtils';
 import { 
   generateServiceCallReportDoc, 
   generateMultipleServiceCallReportsDoc,
@@ -9,7 +9,6 @@ import {
   getMultipleServiceCallReportsBlob
 } from '../services/docGenerator';
 import { initAuth, googleSignIn, googleSignOut } from '../services/firebaseAuth';
-import { getOrCreateFolder, uploadFileToGoogleDrive } from '../services/googleDrive';
 
 const OFFICE_EMAIL_MAP: Record<string, string> = {
   "alapakkam": "alapakkamso@indiapost.gov.in",
@@ -138,9 +137,13 @@ const yyyymmddToDdmmyyyy = (str: string) => {
 
 const hrsToTimeValue = (str: string) => {
   if (!str) return '';
-  const matched = str.match(/(\d{2}):(\d{2})/);
+  const matched = str.match(/(\d{1,2})[:.](\d{2})/);
   if (matched) {
-    return `${matched[1]}:${matched[2]}`;
+    return `${matched[1].padStart(2, '0')}:${matched[2]}`;
+  }
+  const single = str.match(/(\d{1,2})/);
+  if (single) {
+    return `${single[1].padStart(2, '0')}:00`;
   }
   return '';
 };
@@ -153,7 +156,7 @@ const timeValueToHrs = (str: string) => {
 const timeToMinutes = (str: string): number => {
   if (!str) return 0;
   const cleaned = str.replace(/hrs\.?/gi, '').trim();
-  const matched = cleaned.match(/(\d{2})[:.](\d{2})/);
+  const matched = cleaned.match(/(\d{1,2})[:.](\d{2})/);
   if (matched) {
     return parseInt(matched[1], 10) * 60 + parseInt(matched[2], 10);
   }
@@ -176,20 +179,71 @@ const getTravelMinutes = (
   db: OfficeDatabaseEntry[],
   mode: string = 'Bus'
 ): number => {
-  const normFrom = (fromOff || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const normTo = (toOff || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const cleanName = (s: string) => (s || '').toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+  const normFrom = cleanName(fromOff);
+  const normTo = cleanName(toOff);
 
   if (!normFrom || !normTo || normFrom === normTo) return 0;
 
-  const matched = db.find(o => {
-    const f = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-    const t = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-    return (f === normFrom && t === normTo) || (f === normTo && t === normFrom);
-  });
+  // Cuddalore OT SO <-> Cuddalore HO is strictly 25 minutes as per Office Matrix Database
+  if (
+    (normFrom.includes('cuddalore ot so') && normTo.includes('cuddalore ho')) ||
+    (normFrom.includes('cuddalore ho') && normTo.includes('cuddalore ot so'))
+  ) {
+    return 25;
+  }
 
-  if (matched) {
-    const isBike = mode.toLowerCase().trim() === 'bike';
-    return isBike ? (matched.durationBike || 20) : (matched.durationBus || 25);
+  // 1. Direct forward match in database
+  const forwardMatch = (db || []).find(o => {
+    const f = cleanName(o.fromOffice);
+    const t = cleanName(o.toOffice);
+    return f === normFrom && t === normTo;
+  });
+  if (forwardMatch) {
+    if (forwardMatch.durationBus !== undefined && forwardMatch.durationBus > 0) {
+      return forwardMatch.durationBus;
+    }
+    if (forwardMatch.fromOfficeToBsMins && forwardMatch.toOfficeToBsMins) {
+      return forwardMatch.fromOfficeToBsMins + forwardMatch.toOfficeToBsMins;
+    }
+    if (forwardMatch.durationBike !== undefined && forwardMatch.durationBike > 0) {
+      return forwardMatch.durationBike;
+    }
+    return 25;
+  }
+
+  // 2. Reverse match fallback in database
+  const reverseMatch = (db || []).find(o => {
+    const f = cleanName(o.fromOffice);
+    const t = cleanName(o.toOffice);
+    return f === normTo && t === normFrom;
+  });
+  if (reverseMatch) {
+    if (reverseMatch.durationBus !== undefined && reverseMatch.durationBus > 0) {
+      return reverseMatch.durationBus;
+    }
+    if (reverseMatch.fromOfficeToBsMins && reverseMatch.toOfficeToBsMins) {
+      return reverseMatch.fromOfficeToBsMins + reverseMatch.toOfficeToBsMins;
+    }
+    if (reverseMatch.durationBike !== undefined && reverseMatch.durationBike > 0) {
+      return reverseMatch.durationBike;
+    }
+    return 25;
+  }
+
+  // 3. Connect via shared bus stand in database
+  const fromBsEntry = (db || []).find(o => 
+    (cleanName(o.fromOffice) === normFrom || cleanName(o.toOffice) === normFrom) && 
+    o.viaBusStand && o.viaBusStand.trim()
+  );
+  const toBsEntry = (db || []).find(o => 
+    (cleanName(o.fromOffice) === normTo || cleanName(o.toOffice) === normTo) && 
+    o.viaBusStand && o.viaBusStand.trim()
+  );
+  if (fromBsEntry && toBsEntry && cleanName(fromBsEntry.viaBusStand) === cleanName(toBsEntry.viaBusStand)) {
+    const fromMins = cleanName(fromBsEntry.fromOffice) === normFrom ? (fromBsEntry.fromOfficeToBsMins || 10) : (fromBsEntry.toOfficeToBsMins || 10);
+    const toMins = cleanName(toBsEntry.fromOffice) === normTo ? (toBsEntry.fromOfficeToBsMins || 10) : (toBsEntry.toOfficeToBsMins || 10);
+    return fromMins + toMins;
   }
 
   const isBike = mode.toLowerCase().trim() === 'bike';
@@ -225,7 +279,7 @@ const getTravelMinutes = (
     if (normTo === "sipcot so") return 40;
   }
 
-  return isBike ? 20 : 25;
+  return 25;
 };
 
 interface ServiceCallReportGeneratorProps {
@@ -255,6 +309,9 @@ interface ServiceCallReportGeneratorProps {
     amountOfSpares: string;
     otherIssues: string;
   };
+  currentVisits?: OfficeVisit[];
+  currentEntryDate?: string;
+  setConfirmedScrDays?: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 }
 
 export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProps> = ({
@@ -276,6 +333,9 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   historicalMonthsList = [],
   formatMMYYYY = (val) => val,
   scrDefaults,
+  currentVisits = [],
+  currentEntryDate = '',
+  setConfirmedScrDays,
 }) => {
   const [editingCall, setEditingCall] = useState<{
     officeAttended: string;
@@ -328,7 +388,6 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
   // Gmail Sending & OAuth states
   const [googleUser, setGoogleUser] = useState<any>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [isSavingToDrive, setIsSavingToDrive] = useState(false);
   const [isGoogleSigningIn, setIsGoogleSigningIn] = useState(false);
 
   useEffect(() => {
@@ -519,26 +578,70 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
 
   const getAutoTimeInForSCR = (officeName: string, currentDate: string, currentId: string) => {
     if (!officeName) return '';
+    const normCurDate = normalizeDateStr(currentDate);
+
     // Find if there is a previous SCR on the same date
     const sameDayCalls = serviceCalls
-      .filter(sc => sc.date === currentDate && sc.id !== currentId)
+      .filter(sc => normalizeDateStr(sc.date) === normCurDate && sc.id !== currentId)
       .sort((a, b) => {
         return timeToMinutes(a.timeOut) - timeToMinutes(b.timeOut);
       });
 
-    // If this is the 1st SCR for the date, calculate starting from 09:00 + travel time from attached office
-    if (sameDayCalls.length === 0) {
+    // Check if there is an existing saved activity/work entry for this date
+    const activityForDate = activities.find(a => normalizeDateStr(a.date) === normCurDate);
+    const activityVisits = (activityForDate?.visits || []).filter(v => 
+      v.officeName && 
+      v.officeName.toLowerCase().replace(/\s+/g, ' ').trim() !== attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim()
+    );
+
+    // Also check unsaved visits from active work entry form if date matches
+    const formVisits = (currentVisits && currentEntryDate && normalizeDateStr(currentEntryDate) === normCurDate)
+      ? currentVisits.filter(v => 
+          v.officeName && 
+          v.officeName.toLowerCase().replace(/\s+/g, ' ').trim() !== attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim()
+        )
+      : [];
+
+    let lastPrevPoint: { office: string, endTimeMin: number } | null = null;
+
+    if (sameDayCalls.length > 0) {
+      const lastCall = sameDayCalls[sameDayCalls.length - 1];
+      lastPrevPoint = {
+        office: lastCall.officeAttended,
+        endTimeMin: timeToMinutes(lastCall.timeOut)
+      };
+    }
+
+    if (activityVisits.length > 0) {
+      const lastActVisit = activityVisits[activityVisits.length - 1];
+      const actEndTimeMin = timeToMinutes(lastActVisit.endTime);
+      if (!lastPrevPoint || actEndTimeMin >= lastPrevPoint.endTimeMin) {
+        lastPrevPoint = {
+          office: lastActVisit.officeName,
+          endTimeMin: actEndTimeMin
+        };
+      }
+    }
+
+    if (formVisits.length > 0) {
+      const lastFormVisit = formVisits[formVisits.length - 1];
+      const formEndTimeMin = timeToMinutes(lastFormVisit.endTime);
+      if (!lastPrevPoint || formEndTimeMin >= lastPrevPoint.endTimeMin) {
+        lastPrevPoint = {
+          office: lastFormVisit.officeName,
+          endTimeMin: formEndTimeMin
+        };
+      }
+    }
+
+    if (!lastPrevPoint) {
       const travelMin = getTravelMinutes(attachedOffice, officeName, officesDb, transportMode);
       const computedTimeMinutes = 9 * 60 + travelMin; // 09:00 is 540 minutes
       return minutesToTimeStr(computedTimeMinutes);
     }
 
-    const lastCall = sameDayCalls[sameDayCalls.length - 1];
-    const prevOffice = lastCall.officeAttended;
-    const baseTimeMinutes = timeToMinutes(lastCall.timeOut);
-
-    const travelMin = getTravelMinutes(prevOffice, officeName, officesDb, transportMode);
-    const computedTimeMinutes = baseTimeMinutes + travelMin;
+    const travelMin = getTravelMinutes(lastPrevPoint.office, officeName, officesDb, transportMode);
+    const computedTimeMinutes = lastPrevPoint.endTimeMin + travelMin;
     return minutesToTimeStr(computedTimeMinutes);
   };
 
@@ -673,6 +776,13 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       updated = [newCall, ...serviceCalls];
     }
     setServiceCalls(updated);
+    if (setConfirmedScrDays) {
+      setConfirmedScrDays(prev => {
+        const next = { ...prev };
+        delete next[formattedDate];
+        return next;
+      });
+    }
     
     const wasEditing = !!selectedSavedId;
     handleClearServiceCall();
@@ -694,8 +804,16 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       confirmText: "Delete",
       accentColor: "rose",
       onConfirm: () => {
+        const targetCall = serviceCalls.find(c => c.id === id);
         const updated = serviceCalls.filter(c => c.id !== id);
         setServiceCalls(updated);
+        if (targetCall && setConfirmedScrDays) {
+          setConfirmedScrDays(prev => {
+            const next = { ...prev };
+            delete next[targetCall.date];
+            return next;
+          });
+        }
         if (selectedSavedId === id) {
           setSelectedSavedId(null);
         }
@@ -743,98 +861,6 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
       return;
     }
     generateServiceCallReportDoc(metadata, attachedOffice, reportData);
-  };
-
-  const handleSaveToGoogleDriveServiceCall = async (call?: ServiceCallReport) => {
-    const rawReportData = call || { id: 'temp', ...editingCall };
-    const reportData = {
-      ...rawReportData,
-      otherIssues: !rawReportData.otherIssues || !rawReportData.otherIssues.trim() ? 'NIL' : rawReportData.otherIssues.trim()
-    };
-    if (!reportData.officeAttended.trim()) {
-      setConfirmModal({
-        title: "Validation Error",
-        message: "Please specify the office attended before generating the report.",
-        confirmText: "Close",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-      return;
-    }
-
-    setIsSavingToDrive(true);
-    try {
-      // 1. Ensure Google Authenticated
-      const token = await ensureGoogleAuth();
-      if (!token) {
-        setIsSavingToDrive(false);
-        return;
-      }
-
-      // 2. Generate the report blob
-      const { blob, fileName } = await getServiceCallReportBlob(metadata, attachedOffice, reportData);
-
-      // 3. Find or create the SA Dairy folder in Google Drive
-      const folderId = await getOrCreateFolder(token, "SA Dairy");
-
-      // 4. Upload file to Google Drive
-      await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
-
-      setConfirmModal({
-        title: "Saved to Google Drive!",
-        message: `"${fileName}" has been successfully saved to your Google Drive in the "SA Dairy" folder!`,
-        confirmText: "Awesome!",
-        accentColor: "emerald",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } catch (error: any) {
-      console.error("Error saving to Google Drive:", error);
-      alert(`Error saving to Google Drive: ${error.message || error}`);
-    } finally {
-      setIsSavingToDrive(false);
-    }
-  };
-
-  const handleSaveMultipleToGoogleDrive = async (items: ServiceCallReport[], titleLabel: string) => {
-    if (items.length === 0) return;
-
-    setIsSavingToDrive(true);
-    try {
-      // 1. Ensure Google Authenticated
-      const token = await ensureGoogleAuth();
-      if (!token) {
-        setIsSavingToDrive(false);
-        return;
-      }
-
-      // 2. Generate the merged report blob
-      const result = await getMultipleServiceCallReportsBlob(metadata, attachedOffice, items);
-      if (!result) {
-        setIsSavingToDrive(false);
-        return;
-      }
-
-      const { blob, fileName } = result;
-
-      // 3. Find or create the SA Dairy folder in Google Drive
-      const folderId = await getOrCreateFolder(token, "SA Dairy");
-
-      // 4. Upload file to Google Drive
-      await uploadFileToGoogleDrive(token, fileName, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", blob, folderId);
-
-      setConfirmModal({
-        title: "Saved to Google Drive!",
-        message: `"${fileName}" has been successfully saved to your Google Drive in the "SA Dairy" folder!`,
-        confirmText: "Awesome!",
-        accentColor: "emerald",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } catch (error: any) {
-      console.error("Error saving multiple to Google Drive:", error);
-      alert(`Error saving multiple to Google Drive: ${error.message || error}`);
-    } finally {
-      setIsSavingToDrive(false);
-    }
   };
 
   const handleDownloadAllSCR = () => {
@@ -921,7 +947,22 @@ export const ServiceCallReportGenerator: React.FC<ServiceCallReportGeneratorProp
                 value={ddmmyyyyToYyyymmdd(editingCall.date)}
                 onChange={(e) => {
                   const formatted = yyyymmddToDdmmyyyy(e.target.value);
-                  setEditingCall(prev => ({ ...prev, date: formatted }));
+                  const newTimeIn = editingCall.officeAttended
+                    ? getAutoTimeInForSCR(editingCall.officeAttended, formatted, selectedSavedId || 'temp')
+                    : editingCall.timeIn;
+                  let newTimeOut = editingCall.timeOut;
+                  if (newTimeIn && editingCall.officeAttended) {
+                    const newTimeInMin = timeToMinutes(newTimeIn);
+                    newTimeOut = newTimeInMin < 17 * 60 
+                      ? '17:00 hrs.' 
+                      : minutesToTimeStr(newTimeInMin + 30);
+                  }
+                  setEditingCall(prev => ({ 
+                    ...prev, 
+                    date: formatted,
+                    timeIn: newTimeIn || prev.timeIn,
+                    timeOut: newTimeOut || prev.timeOut
+                  }));
                   if (e.target.value) {
                     setDraftFilterDate(e.target.value);
                     setIsDateExplicitlySelected(true);

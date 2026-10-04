@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
@@ -57,6 +58,8 @@ interface SyncPayload {
   pin: string;
   data: any;
   createdAt: number;
+  downloaded?: boolean;
+  downloadedAt?: number | null;
 }
 
 let syncStore: Record<string, SyncPayload> = {};
@@ -96,9 +99,38 @@ function saveSyncStore() {
 }
 
 // API Routes
-// API Routes
 const ACCOUNTS_FILE = path.join(process.cwd(), "web-sync-accounts.json");
 let accountsStore: Record<string, { email: string; passcode: string; payload: any; updatedAt: number; device?: string; history?: Array<{ payload: any; updatedAt: number; device?: string }> }> = {};
+
+// Direct Cross-Device Workspace Sync Store (PC <-> Mobile)
+const SHARED_WORKSPACE_FILE = path.join(process.cwd(), "shared-workspace-sync.json");
+let sharedWorkspace: {
+  payload: any;
+  updatedAt: number;
+  device: string;
+  profileName?: string;
+  history?: Array<{ updatedAt: number; device: string; profileName?: string }>;
+} | null = null;
+
+try {
+  if (fs.existsSync(SHARED_WORKSPACE_FILE)) {
+    const raw = fs.readFileSync(SHARED_WORKSPACE_FILE, "utf-8");
+    sharedWorkspace = JSON.parse(raw);
+    console.log(`[Shared Sync] Loaded shared workspace updated at ${new Date(sharedWorkspace?.updatedAt || 0).toLocaleString()}`);
+  }
+} catch (err) {
+  console.log("[Shared Sync] Starting fresh shared workspace.");
+}
+
+function saveSharedWorkspace() {
+  try {
+    if (sharedWorkspace) {
+      fs.writeFileSync(SHARED_WORKSPACE_FILE, JSON.stringify(sharedWorkspace, null, 2), "utf-8");
+    }
+  } catch (err) {
+    console.error("[Shared Sync] Failed to write shared workspace to disk", err);
+  }
+}
 
 // Load previous accounts store if exists
 try {
@@ -409,10 +441,108 @@ app.post("/api/web-storage/save", (req, res) => {
   }
 });
 
+// ==========================================
+// DIRECT SEAMLESS SYNC (PC <-> MOBILE)
+// No QR codes, No PINs, 1-Click Sync
+// ==========================================
+app.post("/api/sync/push", (req, res) => {
+  try {
+    const { payload, device } = req.body;
+    if (!payload || typeof payload !== "object") {
+      return res.status(400).json({ success: false, message: "Invalid workspace payload data." });
+    }
+
+    const currentDevice = device || "Device";
+    const profileName = payload.metadata?.name || payload.activeProfile || "Staff Profile";
+    const now = Date.now();
+
+    if (!sharedWorkspace) {
+      sharedWorkspace = {
+        payload,
+        updatedAt: now,
+        device: currentDevice,
+        profileName,
+        history: []
+      };
+    } else {
+      if (!sharedWorkspace.history) sharedWorkspace.history = [];
+      sharedWorkspace.history.unshift({
+        updatedAt: sharedWorkspace.updatedAt,
+        device: sharedWorkspace.device,
+        profileName: sharedWorkspace.profileName
+      });
+      if (sharedWorkspace.history.length > 10) {
+        sharedWorkspace.history = sharedWorkspace.history.slice(0, 10);
+      }
+      sharedWorkspace.payload = payload;
+      sharedWorkspace.updatedAt = now;
+      sharedWorkspace.device = currentDevice;
+      sharedWorkspace.profileName = profileName;
+    }
+
+    saveSharedWorkspace();
+    console.log(`[Direct Sync] Uploaded from ${currentDevice} (${profileName}) at ${new Date(now).toLocaleTimeString()}`);
+    return res.json({
+      success: true,
+      updatedAt: now,
+      device: currentDevice,
+      profileName,
+      message: `Successfully uploaded from ${currentDevice} to cloud!`
+    });
+  } catch (error: any) {
+    console.error("[Direct Sync] Push error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get("/api/sync/pull", (req, res) => {
+  try {
+    if (!sharedWorkspace || !sharedWorkspace.payload) {
+      return res.status(404).json({ success: false, message: "No data uploaded to cloud yet. Please upload from your PC or Mobile first." });
+    }
+
+    return res.json({
+      success: true,
+      payload: sharedWorkspace.payload,
+      updatedAt: sharedWorkspace.updatedAt,
+      device: sharedWorkspace.device || "Other Device",
+      profileName: sharedWorkspace.profileName || "Staff Profile",
+      message: `Successfully retrieved latest data from ${sharedWorkspace.device || "cloud"}!`
+    });
+  } catch (error: any) {
+    console.error("[Direct Sync] Pull error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get("/api/sync/status", (req, res) => {
+  try {
+    if (!sharedWorkspace || !sharedWorkspace.payload) {
+      return res.json({
+        success: true,
+        hasData: false,
+        updatedAt: 0,
+        device: null,
+        profileName: null
+      });
+    }
+
+    return res.json({
+      success: true,
+      hasData: true,
+      updatedAt: sharedWorkspace.updatedAt,
+      device: sharedWorkspace.device || "Other Device",
+      profileName: sharedWorkspace.profileName || "Staff Profile"
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 app.post("/api/cloud-sync/upload", (req, res) => {
   try {
     const data = req.body;
-    if (!data || !data.metadata) {
+    if (!data || (typeof data !== "object")) {
       return res.status(400).json({ success: false, message: "Invalid sync payload data." });
     }
 
@@ -429,15 +559,39 @@ app.post("/api/cloud-sync/upload", (req, res) => {
     syncStore[pin] = {
       pin,
       data,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      downloaded: false,
+      downloadedAt: null
     };
 
     saveSyncStore();
 
-    console.log(`[Cloud Sync] Created Sync PIN ${pin} for name: ${data.metadata.name || "Anonymous User"}`);
-    return res.json({ success: true, pin });
+    const senderName = data.metadata?.name || data.activeProfile || "Staff User";
+    console.log(`[Cloud Sync] Created Sync PIN ${pin} for: ${senderName}`);
+    return res.json({ success: true, pin, expiresAt: Date.now() + 48 * 60 * 60 * 1000 });
   } catch (error: any) {
     console.error("[Cloud Sync] Upload error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get("/api/cloud-sync/status/:pin", (req, res) => {
+  try {
+    const pin = (req.params.pin || "").trim().replace(/\s+/g, "");
+    const entry = syncStore[pin];
+
+    if (!entry) {
+      return res.status(404).json({ success: false, message: "Sync PIN not found or has expired." });
+    }
+
+    return res.json({
+      success: true,
+      pin,
+      downloaded: !!entry.downloaded,
+      downloadedAt: entry.downloadedAt || null,
+      createdAt: entry.createdAt
+    });
+  } catch (error: any) {
     return res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -459,6 +613,11 @@ app.get("/api/cloud-sync/download/:pin", (req, res) => {
       return res.status(404).json({ success: false, message: "Sync PIN not found or has expired." });
     }
 
+    // Mark as downloaded for real-time sender confirmation
+    entry.downloaded = true;
+    entry.downloadedAt = Date.now();
+    saveSyncStore();
+
     console.log(`[Cloud Sync] Successful sync download for PIN ${pin}`);
     return res.json({ success: true, data: entry.data });
   } catch (error: any) {
@@ -469,9 +628,15 @@ app.get("/api/cloud-sync/download/:pin", (req, res) => {
 
 // Start integration with Vite
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
+    const isDisableHmr = process.env.DISABLE_HMR === "true";
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isDisableHmr ? false : { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -484,7 +649,7 @@ async function startServer() {
   }
 
   // Bind to 0.0.0.0 and Port 3000 as required by the platform environment
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Cloud Sync Server] Running on http://0.0.0.0:${PORT}`);
   });
 }

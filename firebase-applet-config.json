@@ -3,8 +3,10 @@
   "appId": "1:771508030257:web:366dd3339ee7e453c63e10",
   "apiKey": "AIzaSyAGVIrtYza9SoO3mRVSQTjTAiJvswr6UYQ",
   "authDomain": "braided-phoenix-7k76w.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-sadairytamovemen-1c46194e-4b8b-4171-ad56-9634dbbe8057",
   "storageBucket": "braided-phoenix-7k76w.firebasestorage.app",
   "messagingSenderId": "771508030257",
   "measurementId": "",
-  "oAuthClientId": "771508030257-fa29phenfam8j0g7lbiiqfiie8dn5p56.apps.googleusercontent.com"
+  "oAuthClientId": "771508030257-fa29phenfam8j0g7lbiiqfiie8dn5p56.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }

@@ -8,18 +8,34 @@ import {
   TableCell, 
   WidthType, 
   BorderStyle, 
-  AlignmentType,
-  UnderlineType,
-  PageBreak,
-  ColumnBreak,
-  VerticalMergeType,
-  PageOrientation,
-  HeightRule,
-  TableLayoutType
+  AlignmentType, 
+  UnderlineType, 
+  PageBreak, 
+  ColumnBreak, 
+  VerticalMergeType, 
+  PageOrientation, 
+  HeightRule, 
+  TableLayoutType 
 } from 'docx';
+import ExcelJS from 'exceljs';
 import { DiaryMetadata, ActivityEntry, MovementEntry, ServiceCallReport, OfficeDatabaseEntry } from '../types';
 import { getFortnightDays, formatDate, to24hDot } from '../utils/dateUtils';
 import JSZip from 'jszip';
+
+export const saveAsExcel = async (workbook: ExcelJS.Workbook, fileName: string) => {
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
 
 const saveAs = async (rawBlob: Blob, fileName: string) => {
   let finalBlob = rawBlob;
@@ -481,14 +497,111 @@ const numberToIndianWords = (num: number): string => {
   return result.replace(/\s+/g, " ").trim();
 };
 
-export const generateTACalculationsDoc = async (
+// Helper to parse date string (DD.MM.YYYY, YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY) into Date for Excel
+export const parseDateToExcel = (dateStr?: string): Date | null => {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+
+  // 1. dd.MM.yyyy
+  const dotParts = trimmed.split('.');
+  if (dotParts.length === 3) {
+    const d = parseInt(dotParts[0], 10);
+    const m = parseInt(dotParts[1], 10);
+    const y = parseInt(dotParts[2], 10);
+    if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12 && y >= 1900 && y <= 2100) {
+      return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    }
+  }
+
+  // 2. yyyy-MM-dd or dd-MM-yyyy
+  const dashParts = trimmed.split('-');
+  if (dashParts.length === 3) {
+    if (dashParts[0].length === 4) {
+      const y = parseInt(dashParts[0], 10);
+      const m = parseInt(dashParts[1], 10);
+      const d = parseInt(dashParts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      }
+    } else {
+      const d = parseInt(dashParts[0], 10);
+      const m = parseInt(dashParts[1], 10);
+      const y = parseInt(dashParts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      }
+    }
+  }
+
+  // 3. dd/MM/yyyy or yyyy/MM/dd
+  const slashParts = trimmed.split('/');
+  if (slashParts.length === 3) {
+    if (slashParts[0].length === 4) {
+      const y = parseInt(slashParts[0], 10);
+      const m = parseInt(slashParts[1], 10);
+      const d = parseInt(slashParts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      }
+    } else {
+      const d = parseInt(slashParts[0], 10);
+      const m = parseInt(slashParts[1], 10);
+      const y = parseInt(slashParts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && d >= 1 && d <= 31 && m >= 1 && m <= 12) {
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+      }
+    }
+  }
+
+  return null;
+};
+
+// Helper to parse time string (HH:MM or HH.MM) into Excel time serial fraction (0.0 to 1.0)
+export const parseTimeToExcelFraction = (timeStr?: string): number | null => {
+  if (!timeStr || typeof timeStr !== 'string') return null;
+  const clean = timeStr.trim().replace('.', ':');
+  if (!clean) return null;
+  const match = clean.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?$/i);
+  if (!match) return null;
+
+  let h = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10);
+  const ampm = match[3]?.toLowerCase();
+
+  if (ampm === 'pm' && h < 12) h += 12;
+  if (ampm === 'am' && h === 12) h = 0;
+
+  if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+    return (h * 60 + m) / 1440;
+  }
+  return null;
+};
+
+export interface TACalculationData {
+  sortedMovements: MovementEntry[];
+  uniqueDates: string[];
+  dateCalculations: { [date: string]: { food: string; purpose: string } };
+  totalBikeKm: number;
+  totalBusFare: number;
+  totalFoodCharges: number;
+  bikeCharges: number;
+  totalAmount: number;
+  netAmountClaimed: number;
+  currencyWords: string;
+  monthName: string;
+  year: number;
+  designation: string;
+}
+
+export const calculateTAMovementData = (
   metadata: DiaryMetadata,
   activities: ActivityEntry[],
   movements: MovementEntry[],
   serviceCalls?: ServiceCallReport[],
   attachedOffice: string = "Kurinjipadi S.O",
   officesDb: OfficeDatabaseEntry[] = []
-) => {
+): TACalculationData => {
   const designation = metadata.designation || 'System Administrator';
 
   // Parse time helper (returns minutes from midnight)
@@ -551,7 +664,7 @@ export const generateTACalculationsDoc = async (
       }
     }
 
-    // New 8 km rule: if all offices visited from attached office are <= 8 km, food allowance is 0
+    // 8 km rule: if all offices visited from attached office are <= 8 km, food allowance is 0
     const matchingActivity = activities.find(a => (a.date || '').trim() === uDate);
     const visitedOffices = matchingActivity
       ? matchingActivity.visits
@@ -599,7 +712,6 @@ export const generateTACalculationsDoc = async (
     let purposeText = "";
 
     if (matchingCalls.length > 0) {
-      // Collect details of problem reported in SCR
       const problemsReported = matchingCalls.flatMap(sc => 
         (sc.problems || []).map(p => p.reported?.trim())
       ).filter(Boolean);
@@ -609,7 +721,6 @@ export const generateTACalculationsDoc = async (
       }
     }
 
-    // Fallback to standard activity issues / offices visited if no SCR problems are reported
     if (!purposeText) {
       if (matchingActivity) {
         const distinctIssues = (matchingActivity.visits || [])
@@ -633,7 +744,6 @@ export const generateTACalculationsDoc = async (
       }
     }
 
-    // Auto sentence case for Purpose of visit
     purposeText = toSentenceCase(purposeText);
 
     dateCalculations[uDate] = {
@@ -681,261 +791,939 @@ export const generateTACalculationsDoc = async (
   const netAmountClaimed = Math.round(totalAmount);
   const currencyWords = numberToIndianWords(netAmountClaimed);
 
-  const createBorderlessRow = (descText: string, valueText: string, isBold: boolean = false) => {
-    return new TableRow({
-      children: [
-        new TableCell({
-          width: { size: 70, type: WidthType.PERCENTAGE },
-          children: [
-            new Paragraph({
-              spacing: { before: 40, after: 40 },
-              children: [
-                new TextRun({
-                  text: cleanText(descText),
-                  bold: isBold,
-                  size: DEFAULT_SIZE,
-                  font: DEFAULT_FONT,
-                }),
-              ],
-            }),
-          ],
-        }),
-        new TableCell({
-          width: { size: 30, type: WidthType.PERCENTAGE },
-          children: [
-            new Paragraph({
-              spacing: { before: 40, after: 40 },
-              children: [
-                new TextRun({
-                  text: cleanText(valueText),
-                  bold: isBold,
-                  size: DEFAULT_SIZE,
-                  font: DEFAULT_FONT,
-                }),
-              ],
-            }),
-          ],
-        }),
-      ],
-    });
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  const monthName = monthNames[metadata.month] || "June";
+  const year = metadata.year || 2026;
+
+  return {
+    sortedMovements,
+    uniqueDates,
+    dateCalculations,
+    totalBikeKm,
+    totalBusFare,
+    totalFoodCharges,
+    bikeCharges,
+    totalAmount,
+    netAmountClaimed,
+    currencyWords,
+    monthName,
+    year,
+    designation
+  };
+};
+
+export const generateTACalculationsExcel = async (
+  metadata: DiaryMetadata,
+  activities: ActivityEntry[],
+  movements: MovementEntry[],
+  serviceCalls?: ServiceCallReport[],
+  attachedOffice: string = "Kurinjipadi S.O",
+  officesDb: OfficeDatabaseEntry[] = []
+) => {
+  const {
+    sortedMovements,
+    uniqueDates,
+    dateCalculations,
+    totalBikeKm,
+    totalBusFare,
+    totalFoodCharges,
+    bikeCharges,
+    totalAmount,
+    netAmountClaimed,
+    currencyWords,
+    monthName,
+    year,
+    designation
+  } = calculateTAMovementData(metadata, activities, movements, serviceCalls, attachedOffice, officesDb);
+
+  // Initialize Excel Workbook
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = metadata.name || 'SA Diary Tracker';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  // Create TA Calculation Worksheet with full A4 Portrait print settings
+  const worksheet = workbook.addWorksheet('TA Calculation', {
+    pageSetup: {
+      paperSize: 9, // A4
+      orientation: 'portrait', // Print ready in A4 Portrait mode
+      fitToPage: true,
+      fitToWidth: 1, // Fit all 11 columns on 1 page width
+      fitToHeight: 0, // Automatic multi-page flow vertically without shrinking
+      margins: {
+        left: 0.25,
+        right: 0.25,
+        top: 0.35,
+        bottom: 0.35,
+        header: 0.15,
+        footer: 0.15,
+      },
+      horizontalCentered: true,
+      verticalCentered: false,
+      printTitlesRow: '3:3' // Repeat table header on every printed page
+    },
+    views: [{ showGridLines: true }]
+  });
+
+  // Calculate content-aware column widths for proper auto-spacing on A4 Portrait
+  const maxFromLen = Math.max(4, ...sortedMovements.map(m => (cleanText(m.fromLocation) || '').length));
+  const maxToLen = Math.max(2, ...sortedMovements.map(m => (cleanText(m.toLocation) || '').length));
+  const maxModeLen = Math.max(4, ...sortedMovements.map(m => (cleanText(m.mode) || '').length));
+
+  worksheet.columns = [
+    { key: 'colA', width: 11 },                                           // Col 1: Date (dd.mm.yyyy)
+    { key: 'colB', width: 7.5 },                                          // Col 2: Time (hh:mm)
+    { key: 'colC', width: Math.min(18, Math.max(13, maxFromLen + 1)) },  // Col 3: From (auto-spaced)
+    { key: 'colD', width: 11 },                                           // Col 4: Date (dd.mm.yyyy)
+    { key: 'colE', width: 7.5 },                                          // Col 5: Time (hh:mm)
+    { key: 'colF', width: Math.min(18, Math.max(13, maxToLen + 1)) },    // Col 6: To (auto-spaced)
+    { key: 'colG', width: Math.max(6.5, maxModeLen + 1) },                // Col 7: Mode
+    { key: 'colH', width: 5.5 },                                          // Col 8: Km
+    { key: 'colI', width: 6.5 },                                          // Col 9: Fare
+    { key: 'colJ', width: 7.5 },                                          // Col 10: Food (e.g. 437.5)
+    { key: 'colK', width: 25 },                                           // Col 11: Purpose of visit (auto-expandable)
+  ];
+
+  // Thin Black Border definition
+  const thinBorder: Partial<ExcelJS.Borders> = {
+    top: { style: 'thin', color: { argb: 'FF000000' } },
+    left: { style: 'thin', color: { argb: 'FF000000' } },
+    bottom: { style: 'thin', color: { argb: 'FF000000' } },
+    right: { style: 'thin', color: { argb: 'FF000000' } }
   };
 
+  // Row 1: Title Header
+  worksheet.mergeCells('A1:K1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = 'TA Calculations';
+  titleCell.font = {
+    name: 'Calibri',
+    size: 16,
+    bold: true,
+    underline: true,
+    color: { argb: 'FF000000' }
+  };
+  titleCell.alignment = {
+    horizontal: 'center',
+    vertical: 'middle'
+  };
+  worksheet.getRow(1).height = 30;
+
+  // Row 2: Blank Spacing
+  worksheet.getRow(2).height = 8;
+
+  // Row 3: Table Header Row
+  const headers = [
+    'Date', 'Time', 'From', 'Date', 'Time', 'To', 'Mode', 'Km', 'Fare', 'Food', 'Purpose of visit'
+  ];
+  const headerRow = worksheet.getRow(3);
+  headerRow.height = 24;
+
+  headers.forEach((h, idx) => {
+    const colNum = idx + 1;
+    const cell = headerRow.getCell(colNum);
+    cell.value = h;
+    cell.font = {
+      name: 'Calibri',
+      size: 10,
+      bold: true,
+      color: { argb: 'FF000000' }
+    };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF2F4F7' }
+    };
+    cell.border = thinBorder;
+    cell.alignment = {
+      horizontal: (colNum === 3 || colNum === 6 || colNum === 11) ? 'left' : 'center',
+      vertical: 'middle',
+      wrapText: true
+    };
+  });
+
+  // Helper to accurately calculate wrapped text lines for auto-expanding Purpose of Visit
+  const estimateWrappedLines = (text: string, charsPerLine = 24): number => {
+    if (!text) return 1;
+    const paragraphs = text.split('\n');
+    let totalLines = 0;
+    for (const para of paragraphs) {
+      const trimmed = para.trim();
+      if (!trimmed) {
+        totalLines += 1;
+        continue;
+      }
+      const words = trimmed.split(/\s+/);
+      let currentLen = 0;
+      let paraLines = 1;
+      for (const w of words) {
+        if (currentLen === 0) {
+          currentLen = w.length;
+        } else if (currentLen + 1 + w.length <= charsPerLine) {
+          currentLen += 1 + w.length;
+        } else {
+          paraLines++;
+          currentLen = w.length;
+        }
+      }
+      totalLines += paraLines;
+    }
+    return Math.max(1, totalLines);
+  };
+
+  let currentRowIdx = 4;
+  const firstDataRow = currentRowIdx;
+
+  // Group sorted movements by unique date to handle merged Food & Purpose cells
+  for (const uDate of uniqueDates) {
+    const legs = sortedMovements.filter(m => (m.date || '').trim() === uDate);
+    const startRow = currentRowIdx;
+    const endRow = currentRowIdx + legs.length - 1;
+    const calc = dateCalculations[uDate] || { food: "437.5", purpose: "Routine inspection / maintenance" };
+
+    // Calculate vertical height required for Purpose of visit to auto-expand cleanly as per content
+    const purposeText = cleanText(calc.purpose) || 'Routine inspection / maintenance';
+    const purposeLines = estimateWrappedLines(purposeText, 24);
+    const totalPurposeHeightNeeded = Math.max(22, purposeLines * 15 + 6);
+
+    // Calculate baseline height for each leg considering location wrap
+    const legHeights: number[] = [];
+    legs.forEach((m) => {
+      const fromLen = (cleanText(m.fromLocation) || '').length;
+      const toLen = (cleanText(m.toLocation) || '').length;
+      const locLines = Math.max(Math.ceil(fromLen / 15), Math.ceil(toLen / 15), 1);
+      legHeights.push(Math.max(20, locLines * 15 + 4));
+    });
+
+    const baseSumHeight = legHeights.reduce((sum, h) => sum + h, 0);
+    const extraNeeded = Math.max(0, totalPurposeHeightNeeded - baseSumHeight);
+    const extraPerLeg = Math.ceil(extraNeeded / legs.length);
+
+    legs.forEach((m, legIdx) => {
+      const row = worksheet.getRow(currentRowIdx);
+      // Row height auto-expands cleanly to fit the content of Purpose of visit and locations
+      row.height = legHeights[legIdx] + extraPerLeg;
+
+      const kmVal = parseFloat(m.km) || 0;
+      let fareText = "";
+      if ((m.mode || '').toUpperCase() === 'BUS') {
+        if (m.fare !== undefined && m.fare !== null && m.fare !== '') {
+          const customFare = parseFloat(m.fare);
+          if (!isNaN(customFare)) {
+            fareText = customFare.toString();
+          }
+        } else if (kmVal > 0) {
+          if (kmVal >= 30) {
+            fareText = "30";
+          } else if (kmVal >= 20) {
+            fareText = "20";
+          } else if (kmVal >= 10) {
+            fareText = "15";
+          } else {
+            fareText = "10";
+          }
+        }
+      }
+
+      // Column values
+      const cellA = row.getCell(1);
+      const fromDateObj = parseDateToExcel(m.date);
+      if (fromDateObj) {
+        cellA.value = fromDateObj;
+        cellA.numFmt = 'dd.mm.yyyy';
+      } else {
+        cellA.value = cleanText(m.date);
+      }
+      cellA.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      const cellB = row.getCell(2);
+      const fromTimeFrac = parseTimeToExcelFraction(m.fromTime);
+      if (fromTimeFrac !== null) {
+        cellB.value = fromTimeFrac;
+        cellB.numFmt = 'hh:mm';
+      } else {
+        cellB.value = cleanText(m.fromTime);
+      }
+      cellB.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      const cellC = row.getCell(3);
+      cellC.value = cleanText(m.fromLocation).toUpperCase();
+      cellC.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+      const cellD = row.getCell(4);
+      const toDateObj = parseDateToExcel(m.toDate || m.date);
+      if (toDateObj) {
+        cellD.value = toDateObj;
+        cellD.numFmt = 'dd.mm.yyyy';
+      } else {
+        cellD.value = cleanText(m.toDate || m.date);
+      }
+      cellD.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      const cellE = row.getCell(5);
+      const toTimeFrac = parseTimeToExcelFraction(m.toTime);
+      if (toTimeFrac !== null) {
+        cellE.value = toTimeFrac;
+        cellE.numFmt = 'hh:mm';
+      } else {
+        cellE.value = cleanText(m.toTime);
+      }
+      cellE.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      const cellF = row.getCell(6);
+      cellF.value = cleanText(m.toLocation).toUpperCase();
+      cellF.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+      // Col 7: Mode - number format without decimal point if numeric, else text
+      const cellG = row.getCell(7);
+      const rawMode = cleanText(m.mode).trim();
+      const numMode = parseFloat(rawMode);
+      if (rawMode !== '' && !isNaN(numMode) && !isNaN(Number(rawMode))) {
+        cellG.value = Math.round(numMode);
+        cellG.numFmt = '0';
+      } else {
+        cellG.value = rawMode.toUpperCase();
+      }
+      cellG.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Col 8: Km - exact number format without rounding off
+      const cellH = row.getCell(8);
+      const parsedKm = parseFloat(m.km);
+      if (!isNaN(parsedKm) && parsedKm > 0) {
+        cellH.value = parsedKm;
+        cellH.numFmt = Number.isInteger(parsedKm) ? '0' : '0.##';
+      } else if (parsedKm === 0) {
+        cellH.value = 0;
+        cellH.numFmt = '0';
+      } else {
+        cellH.value = '';
+      }
+      cellH.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Col 9: Fare - number format without decimal point for standard bus fares
+      const cellI = row.getCell(9);
+      const parsedFare = parseFloat(fareText);
+      if (!isNaN(parsedFare) && parsedFare > 0) {
+        cellI.value = Math.round(parsedFare);
+        cellI.numFmt = '0';
+      } else if (parsedFare === 0) {
+        cellI.value = 0;
+        cellI.numFmt = '0';
+      } else {
+        cellI.value = '';
+      }
+      cellI.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Apply standard formatting and borders to all 11 columns for this row
+      for (let c = 1; c <= 11; c++) {
+        const cCell = row.getCell(c);
+        cCell.border = thinBorder;
+        cCell.font = { name: 'Calibri', size: 10, color: { argb: 'FF000000' } };
+      }
+
+      currentRowIdx++;
+    });
+
+    const parsedFood = parseFloat(calc.food);
+    const validFood = !isNaN(parsedFood) && parsedFood > 0 ? parsedFood : 0;
+
+    // Merge Food (Col 10) and Purpose of visit (Col 11) for multiple legs on the same date
+    // Food formatted with single decimal point ('0.0') as requested
+    if (startRow === endRow) {
+      const foodCell = worksheet.getCell(startRow, 10);
+      foodCell.value = validFood;
+      foodCell.numFmt = '0.0';
+      foodCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      const purposeCell = worksheet.getCell(startRow, 11);
+      purposeCell.value = cleanText(calc.purpose);
+      purposeCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    } else {
+      worksheet.mergeCells(startRow, 10, endRow, 10);
+      const foodCell = worksheet.getCell(startRow, 10);
+      foodCell.value = validFood;
+      foodCell.numFmt = '0.0';
+      foodCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      worksheet.mergeCells(startRow, 11, endRow, 11);
+      const purposeCell = worksheet.getCell(startRow, 11);
+      purposeCell.value = cleanText(calc.purpose);
+      purposeCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+      // Re-apply borders and number formats on all cells in the merged span so gridlines print flawlessly
+      for (let r = startRow; r <= endRow; r++) {
+        worksheet.getCell(r, 10).border = thinBorder;
+        worksheet.getCell(r, 10).numFmt = '0.0';
+        worksheet.getCell(r, 11).border = thinBorder;
+      }
+    }
+  }
+
+  const lastDataRow = Math.max(firstDataRow, currentRowIdx - 1);
+
+  // Blank spacing row after data table
+  worksheet.getRow(currentRowIdx).height = 10;
+  currentRowIdx++;
+
+  // Certificate 1
+  worksheet.mergeCells(`A${currentRowIdx}:K${currentRowIdx}`);
+  const cert1 = worksheet.getCell(`A${currentRowIdx}`);
+  cert1.value = 'Certified that the amount charged as food bill was actually incurred by me.';
+  cert1.font = { name: 'Calibri', size: 10.5, color: { argb: 'FF000000' } };
+  cert1.alignment = { horizontal: 'left', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 18;
+  currentRowIdx++;
+
+  // Certificate 2
+  worksheet.mergeCells(`A${currentRowIdx}:K${currentRowIdx}`);
+  const cert2 = worksheet.getCell(`A${currentRowIdx}`);
+  cert2.value = 'It is also certified that vouchers were not given by the vendors for the food taken.';
+  cert2.font = { name: 'Calibri', size: 10.5, color: { argb: 'FF000000' } };
+  cert2.alignment = { horizontal: 'left', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 18;
+  currentRowIdx++;
+
+  // Blank spacing row before calculation summary
+  worksheet.getRow(currentRowIdx).height = 8;
+  currentRowIdx++;
+
+  // Summary row indices for formulas
+  const rowBike = currentRowIdx;
+  const rowBus = currentRowIdx + 1;
+  const rowFood = currentRowIdx + 2;
+  const rowLocal = currentRowIdx + 3;
+  const rowLodge = currentRowIdx + 4;
+  const rowTotal = currentRowIdx + 5;
+  const rowAdv = currentRowIdx + 6;
+  const rowNet = currentRowIdx + 7;
+
+  const formattedTotalBikeKmExcel = Number.isInteger(totalBikeKm)
+    ? totalBikeKm.toString()
+    : parseFloat(totalBikeKm.toFixed(2)).toString();
+
+  // Summary rows using real Excel formulas and number formats
+  const summaryRows = [
+    {
+      desc: totalBikeKm > 200 
+        ? `Total No. of Kilometers Utilized through Two Wheelers ${formattedTotalBikeKmExcel} km (Only 200 km charged) x Rs.15`
+        : `Total No. of Kilometers Utilized through Two Wheelers ${formattedTotalBikeKmExcel} x Rs.15`,
+      val: {
+        formula: `MIN(SUMIFS(H${firstDataRow}:H${lastDataRow}, G${firstDataRow}:G${lastDataRow}, "BIKE"), 200) * 15`,
+        result: bikeCharges
+      },
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Total Bus Fare paid',
+      val: {
+        formula: `SUM(I${firstDataRow}:I${lastDataRow})`,
+        result: totalBusFare
+      },
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Amount of Food charges claimed',
+      val: {
+        formula: `SUM(J${firstDataRow}:J${lastDataRow})`,
+        result: totalFoodCharges
+      },
+      numFmt: '"Rs. "#,##0.0;"Rs. "-#,##0.0;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Total amount of locally journey performed',
+      val: 0,
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Total Amount for Lodging',
+      val: 0,
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Total',
+      val: {
+        formula: `SUM(I${rowBike}:I${rowLodge})`,
+        result: totalAmount
+      },
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Less Advance Taken',
+      val: 0,
+      numFmt: '"Rs. "#,##0.00;"Rs. "-#,##0.00;"Rs. Nil"',
+      bold: false
+    },
+    {
+      desc: 'Net Amount Claimed',
+      val: {
+        formula: `ROUND(I${rowTotal} - I${rowAdv}, 0)`,
+        result: netAmountClaimed
+      },
+      numFmt: '"Rs. "#,##0;"Rs. "-#,##0;"Rs. Nil"',
+      bold: true
+    }
+  ];
+
+  summaryRows.forEach(item => {
+    worksheet.mergeCells(`A${currentRowIdx}:H${currentRowIdx}`);
+    const descCell = worksheet.getCell(`A${currentRowIdx}`);
+    descCell.value = item.desc;
+    descCell.font = { name: 'Calibri', size: 10.5, bold: item.bold, color: { argb: 'FF000000' } };
+    descCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+    worksheet.mergeCells(`I${currentRowIdx}:K${currentRowIdx}`);
+    const valCell = worksheet.getCell(`I${currentRowIdx}`);
+    valCell.value = item.val;
+    valCell.numFmt = item.numFmt;
+    valCell.font = { name: 'Calibri', size: 10.5, bold: item.bold, color: { argb: 'FF000000' } };
+    valCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+    worksheet.getRow(currentRowIdx).height = 18;
+    currentRowIdx++;
+  });
+
+  // Amount in Words
+  worksheet.mergeCells(`A${currentRowIdx}:K${currentRowIdx}`);
+  const wordsCell = worksheet.getCell(`A${currentRowIdx}`);
+  wordsCell.value = `(Rs. ${cleanText(currencyWords)} only)`;
+  wordsCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF000000' } };
+  wordsCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 22;
+  currentRowIdx++;
+
+  // Spacing before signatures
+  worksheet.getRow(currentRowIdx).height = 20;
+  currentRowIdx++;
+
+  // Signatures Row 1
+  worksheet.mergeCells(`A${currentRowIdx}:E${currentRowIdx}`);
+  const subToCell = worksheet.getCell(`A${currentRowIdx}`);
+  subToCell.value = 'Submitted to:';
+  subToCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF000000' } };
+  subToCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  worksheet.mergeCells(`G${currentRowIdx}:K${currentRowIdx}`);
+  const nameCell = worksheet.getCell(`G${currentRowIdx}`);
+  nameCell.value = cleanText(metadata.name);
+  nameCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF000000' } };
+  nameCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 18;
+  currentRowIdx++;
+
+  // Signatures Row 2
+  worksheet.mergeCells(`A${currentRowIdx}:E${currentRowIdx}`);
+  const spoCell = worksheet.getCell(`A${currentRowIdx}`);
+  spoCell.value = 'The SPO’s Cuddalore Division Cuddalore-607001.';
+  spoCell.font = { name: 'Calibri', size: 10.5, color: { argb: 'FF000000' } };
+  spoCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+  worksheet.mergeCells(`G${currentRowIdx}:K${currentRowIdx}`);
+  const desigCell = worksheet.getCell(`G${currentRowIdx}`);
+  desigCell.value = `${cleanText(designation)},`;
+  desigCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF000000' } };
+  desigCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 18;
+  currentRowIdx++;
+
+  // Signatures Row 3
+  worksheet.mergeCells(`G${currentRowIdx}:K${currentRowIdx}`);
+  const offCell = worksheet.getCell(`G${currentRowIdx}`);
+  offCell.value = `${cleanText(metadata.office)}.`;
+  offCell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: 'FF000000' } };
+  offCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  worksheet.getRow(currentRowIdx).height = 18;
+
+  // Save Excel file
+  const fileName = `TA Calculation-${monthName} ${year}.xlsx`;
+  await saveAsExcel(workbook, fileName);
+};
+
+export const generateTACalculationsDocx = async (
+  metadata: DiaryMetadata,
+  activities: ActivityEntry[],
+  movements: MovementEntry[],
+  serviceCalls?: ServiceCallReport[],
+  attachedOffice: string = "Kurinjipadi S.O",
+  officesDb: OfficeDatabaseEntry[] = []
+) => {
+  const {
+    sortedMovements,
+    uniqueDates,
+    dateCalculations,
+    totalBikeKm,
+    totalBusFare,
+    totalFoodCharges,
+    bikeCharges,
+    totalAmount,
+    netAmountClaimed,
+    currencyWords,
+    monthName,
+    year,
+    designation
+  } = calculateTAMovementData(metadata, activities, movements, serviceCalls, attachedOffice, officesDb);
+
+  const colWidths = [8, 6, 14, 8, 6, 14, 6, 5, 5, 7, 21];
+  const tableHeaders = [
+    'Date', 'Time', 'From', 'Date', 'Time', 'To', 'Mode', 'Km', 'Fare', 'Food', 'Purpose of visit'
+  ];
+
+  const tableBorders = {
+    top: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+    bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+    left: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+    right: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+    insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+    insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
+  };
+
+  // Header Row
+  const tableRows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: tableHeaders.map((h, idx) => new TableCell({
+        width: { size: colWidths[idx], type: WidthType.PERCENTAGE },
+        children: [
+          new Paragraph({
+            alignment: (idx === 2 || idx === 5 || idx === 10) ? AlignmentType.LEFT : AlignmentType.CENTER,
+            spacing: { before: 50, after: 50 },
+            children: [new TextRun({ text: h, bold: true, size: 16, font: DEFAULT_FONT })]
+          })
+        ]
+      }))
+    })
+  ];
+
+  // Data Rows
+  for (const uDate of uniqueDates) {
+    const legs = sortedMovements.filter(m => (m.date || '').trim() === uDate);
+    const calc = dateCalculations[uDate] || { food: "437.5", purpose: "Routine inspection / maintenance" };
+
+    for (let legIdx = 0; legIdx < legs.length; legIdx++) {
+      const m = legs[legIdx];
+      const kmVal = parseFloat(m.km) || 0;
+      let fareText = "";
+      if ((m.mode || '').toUpperCase() === 'BUS') {
+        if (m.fare !== undefined && m.fare !== null && m.fare !== '') {
+          const customFare = parseFloat(m.fare);
+          if (!isNaN(customFare)) {
+            fareText = customFare.toString();
+          }
+        } else if (kmVal > 0) {
+          if (kmVal >= 30) {
+            fareText = "30";
+          } else if (kmVal >= 20) {
+            fareText = "20";
+          } else if (kmVal >= 10) {
+            fareText = "15";
+          } else {
+            fareText = "10";
+          }
+        }
+      }
+
+      const parsedKm = parseFloat(m.km);
+      const kmText = m.km 
+        ? (!isNaN(parsedKm) 
+            ? (Number.isInteger(parsedKm) ? parsedKm.toString() : parseFloat(parsedKm.toFixed(2)).toString()) 
+            : cleanText(m.km)) 
+        : '';
+      const rawMode = cleanText(m.mode).trim();
+      const numMode = parseFloat(rawMode);
+      const modeText = (rawMode !== '' && !isNaN(numMode) && !isNaN(Number(rawMode)))
+        ? Math.round(numMode).toString()
+        : rawMode.toUpperCase();
+
+      const parsedFoodVal = parseFloat(calc.food);
+      const foodText = !isNaN(parsedFoodVal) ? parsedFoodVal.toFixed(1) : (calc.food || '0.0');
+
+      const cells: TableCell[] = [
+        // Col 1: Date
+        new TableCell({
+          width: { size: colWidths[0], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(m.date), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 2: From Time
+        new TableCell({
+          width: { size: colWidths[1], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(to24hDot(m.fromTime)), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 3: From Location
+        new TableCell({
+          width: { size: colWidths[2], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.LEFT, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(m.fromLocation).toUpperCase(), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 4: To Date
+        new TableCell({
+          width: { size: colWidths[3], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(m.toDate || m.date), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 5: To Time
+        new TableCell({
+          width: { size: colWidths[4], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(to24hDot(m.toTime)), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 6: To Location
+        new TableCell({
+          width: { size: colWidths[5], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.LEFT, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(m.toLocation).toUpperCase(), size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 7: Mode
+        new TableCell({
+          width: { size: colWidths[6], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: modeText, size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 8: Km
+        new TableCell({
+          width: { size: colWidths[7], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: kmText, size: 16, font: DEFAULT_FONT })] })]
+        }),
+        // Col 9: Fare
+        new TableCell({
+          width: { size: colWidths[8], type: WidthType.PERCENTAGE },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: fareText, size: 16, font: DEFAULT_FONT })] })]
+        }),
+      ];
+
+      // Col 10: Food & Col 11: Purpose
+      if (legs.length === 1) {
+        cells.push(
+          new TableCell({
+            width: { size: colWidths[9], type: WidthType.PERCENTAGE },
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: foodText, size: 16, font: DEFAULT_FONT })] })]
+          }),
+          new TableCell({
+            width: { size: colWidths[10], type: WidthType.PERCENTAGE },
+            children: [new Paragraph({ alignment: AlignmentType.LEFT, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(calc.purpose), size: 16, font: DEFAULT_FONT })] })]
+          })
+        );
+      } else {
+        if (legIdx === 0) {
+          cells.push(
+            new TableCell({
+              width: { size: colWidths[9], type: WidthType.PERCENTAGE },
+              verticalMerge: VerticalMergeType.RESTART,
+              children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: foodText, size: 16, font: DEFAULT_FONT })] })]
+            }),
+            new TableCell({
+              width: { size: colWidths[10], type: WidthType.PERCENTAGE },
+              verticalMerge: VerticalMergeType.RESTART,
+              children: [new Paragraph({ alignment: AlignmentType.LEFT, spacing: { before: 40, after: 40 }, children: [new TextRun({ text: cleanText(calc.purpose), size: 16, font: DEFAULT_FONT })] })]
+            })
+          );
+        } else {
+          cells.push(
+            new TableCell({
+              width: { size: colWidths[9], type: WidthType.PERCENTAGE },
+              verticalMerge: VerticalMergeType.CONTINUE,
+              children: [new Paragraph({ children: [] })]
+            }),
+            new TableCell({
+              width: { size: colWidths[10], type: WidthType.PERCENTAGE },
+              verticalMerge: VerticalMergeType.CONTINUE,
+              children: [new Paragraph({ children: [] })]
+            })
+          );
+        }
+      }
+
+      tableRows.push(
+        new TableRow({
+          children: cells
+        })
+      );
+    }
+  }
+
+  const table = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: tableBorders,
+    rows: tableRows
+  });
+
+  const formattedTotalBikeKmDoc = Number.isInteger(totalBikeKm)
+    ? totalBikeKm.toString()
+    : parseFloat(totalBikeKm.toFixed(2)).toString();
+
+  // Summary breakdown
+  const summaryRowsData = [
+    {
+      desc: totalBikeKm > 200 
+        ? `Total No. of Kilometers Utilized through Two Wheelers ${formattedTotalBikeKmDoc} km (Only 200 km charged) x Rs.15`
+        : `Total No. of Kilometers Utilized through Two Wheelers ${formattedTotalBikeKmDoc} x Rs.15`,
+      val: `Rs. ${bikeCharges > 0 ? bikeCharges.toFixed(2) : 'Nil'}`,
+      bold: false
+    },
+    {
+      desc: 'Total Bus Fare paid',
+      val: `Rs. ${totalBusFare > 0 ? totalBusFare.toFixed(2) : 'Nil'}`,
+      bold: false
+    },
+    {
+      desc: 'Amount of Food charges claimed',
+      val: `Rs. ${totalFoodCharges > 0 ? totalFoodCharges.toFixed(2) : 'Nil'}`,
+      bold: false
+    },
+    {
+      desc: 'Total amount of locally journey performed',
+      val: 'Rs. Nil',
+      bold: false
+    },
+    {
+      desc: 'Total Amount for Lodging',
+      val: 'Rs. Nil',
+      bold: false
+    },
+    {
+      desc: 'Total',
+      val: `Rs. ${totalAmount > 0 ? totalAmount.toFixed(2) : 'Nil'}`,
+      bold: false
+    },
+    {
+      desc: 'Less Advance Taken',
+      val: 'Rs. Nil',
+      bold: false
+    },
+    {
+      desc: 'Net Amount Claimed',
+      val: `Rs. ${netAmountClaimed > 0 ? netAmountClaimed.toFixed(2) : 'Nil'}`,
+      bold: true
+    }
+  ];
+
+  const summaryTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.NONE },
+      bottom: { style: BorderStyle.NONE },
+      left: { style: BorderStyle.NONE },
+      right: { style: BorderStyle.NONE },
+      insideHorizontal: { style: BorderStyle.NONE },
+      insideVertical: { style: BorderStyle.NONE }
+    },
+    rows: summaryRowsData.map(item => new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 78, type: WidthType.PERCENTAGE },
+          borders: {
+            top: { style: BorderStyle.NONE },
+            bottom: { style: BorderStyle.NONE },
+            left: { style: BorderStyle.NONE },
+            right: { style: BorderStyle.NONE }
+          },
+          children: [
+            new Paragraph({
+              spacing: { before: 25, after: 25 },
+              children: [new TextRun({ text: item.desc, bold: item.bold, size: 18, font: DEFAULT_FONT })]
+            })
+          ]
+        }),
+        new TableCell({
+          width: { size: 22, type: WidthType.PERCENTAGE },
+          borders: {
+            top: { style: BorderStyle.NONE },
+            bottom: { style: BorderStyle.NONE },
+            left: { style: BorderStyle.NONE },
+            right: { style: BorderStyle.NONE }
+          },
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.RIGHT,
+              spacing: { before: 25, after: 25 },
+              children: [new TextRun({ text: item.val, bold: item.bold, size: 18, font: DEFAULT_FONT })]
+            })
+          ]
+        })
+      ]
+    }))
+  });
+
   const doc = new Document({
-    compatabilityModeVersion: 12,
-    compatibility: { version: 12 },
     sections: [
       {
         properties: {
           page: {
             size: {
-              width: 11906,  // A4 width (210 mm) in dxa
-              height: 16838, // A4 height (297 mm) in dxa
-              code: 9,       // A4 paper size code
+              orientation: PageOrientation.LANDSCAPE,
             },
             margin: {
-              top: 720, // 0.5 inch
-              right: 720,
-              bottom: 720,
-              left: 720,
+              top: 500,
+              bottom: 500,
+              left: 500,
+              right: 500,
             },
           },
         },
         children: [
-          // Header
+          // Title
           new Paragraph({
             alignment: AlignmentType.CENTER,
-            spacing: { after: 300 },
+            spacing: { before: 60, after: 160 },
             children: [
               new TextRun({
                 text: "TA Calculations",
                 bold: true,
                 underline: { type: UnderlineType.SINGLE },
-                size: HEADER_SIZE,
-                font: DEFAULT_FONT,
-              }),
-            ],
+                size: 24,
+                font: DEFAULT_FONT
+              })
+            ]
           }),
 
-          // Table
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            margins: {
-              top: 15,
-              bottom: 15,
-              left: 60,
-              right: 60,
-            },
-            borders: {
-              top: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-              bottom: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-              left: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-              right: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-              insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-              insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
-            },
-            rows: [
-              // Header Row
-              new TableRow({
-                children: [
-                  "Date", "Time", "From", "Date", "Time", "To", "Mode", "Km", "Fare", "Food", "Purpose of visit"
-                ].map((h, idx) => new TableCell({
-                  width: { size: [8, 6, 15, 8, 6, 15, 7, 5, 5, 8, 17][idx], type: WidthType.PERCENTAGE },
-                  children: [
-                    new Paragraph({
-                      spacing: { before: 10, after: 10 },
-                      children: [
-                        new TextRun({ text: h, bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT }),
-                      ],
-                      alignment: (idx === 2 || idx === 5 || idx === 10) ? AlignmentType.LEFT : AlignmentType.CENTER,
-                    }),
-                  ],
-                })),
-              }),
+          // Data Table
+          table,
 
-              // Data Rows
-              ...sortedMovements.map((m, i) => {
-                const isFirstForDate = i === 0 || (sortedMovements[i - 1].date || '').trim() !== (m.date || '').trim();
-                const calc = dateCalculations[(m.date || '').trim()] || { food: "437.5", purpose: "Routine inspection / maintenance" };
+          // Spacing
+          new Paragraph({ spacing: { before: 120, after: 40 }, children: [] }),
 
-                const kmVal = parseFloat(m.km) || 0;
-                let fareText = "";
-                if ((m.mode || '').toUpperCase() === 'BUS') {
-                  if (m.fare !== undefined && m.fare !== null && m.fare !== '') {
-                    const customFare = parseFloat(m.fare);
-                    if (!isNaN(customFare)) {
-                      fareText = customFare.toString();
-                    }
-                  } else if (kmVal > 0) {
-                    if (kmVal >= 30) {
-                      fareText = "30";
-                    } else if (kmVal >= 20) {
-                      fareText = "20";
-                    } else if (kmVal >= 10) {
-                      fareText = "15";
-                    } else {
-                      fareText = "10";
-                    }
-                  }
-                }
-
-                // Food cell - merged layout for rows of the same date
-                let foodCell: TableCell;
-                if (isFirstForDate) {
-                  foodCell = new TableCell({
-                    width: { size: 8, type: WidthType.PERCENTAGE },
-                    verticalMerge: VerticalMergeType.RESTART,
-                    children: [
-                      new Paragraph({
-                        spacing: { before: 5, after: 5 },
-                        children: [
-                          new TextRun({ text: cleanText(calc.food), size: 19, font: DEFAULT_FONT }),
-                        ],
-                        alignment: AlignmentType.CENTER,
-                      }),
-                    ],
-                  });
-                } else {
-                  foodCell = new TableCell({
-                    width: { size: 8, type: WidthType.PERCENTAGE },
-                    verticalMerge: VerticalMergeType.CONTINUE,
-                    children: [
-                      new Paragraph({
-                        spacing: { before: 5, after: 5 },
-                        children: [new TextRun("")],
-                      }),
-                    ],
-                  });
-                }
-
-                // Purpose of visit cell - merged layout for rows of the same date
-                let purposeCell: TableCell;
-                if (isFirstForDate) {
-                  purposeCell = new TableCell({
-                    width: { size: 17, type: WidthType.PERCENTAGE },
-                    verticalMerge: VerticalMergeType.RESTART,
-                    children: [
-                      new Paragraph({
-                        spacing: { before: 5, after: 5 },
-                        children: [
-                          new TextRun({ text: cleanText(calc.purpose), size: 19, font: DEFAULT_FONT }),
-                        ],
-                        alignment: AlignmentType.LEFT,
-                      }),
-                    ],
-                  });
-                } else {
-                  purposeCell = new TableCell({
-                    width: { size: 17, type: WidthType.PERCENTAGE },
-                    verticalMerge: VerticalMergeType.CONTINUE,
-                    children: [
-                      new Paragraph({
-                        spacing: { before: 5, after: 5 },
-                        children: [new TextRun("")],
-                      }),
-                    ],
-                  });
-                }
-
-                const standardValues = [
-                  cleanText(m.date),
-                  cleanText(to24hDot(m.fromTime)),
-                  cleanText(m.fromLocation),
-                  cleanText(m.toDate),
-                  cleanText(to24hDot(m.toTime)),
-                  cleanText(m.toLocation),
-                  cleanText(m.mode),
-                  cleanText(m.km),
-                  cleanText(fareText),
-                ];
-
-                const cells = standardValues.map((v, idx) => new TableCell({
-                  width: { 
-                    size: [8, 6, 15, 8, 6, 15, 7, 5, 5][idx], 
-                    type: WidthType.PERCENTAGE 
-                  },
-                  children: [
-                    new Paragraph({
-                      spacing: { before: 5, after: 5 },
-                      children: [
-                        new TextRun({ text: cleanText(v).toUpperCase(), size: 19, font: DEFAULT_FONT }),
-                      ],
-                      alignment: (idx === 2 || idx === 5) ? AlignmentType.LEFT : AlignmentType.CENTER,
-                    }),
-                  ],
-                }));
-
-                return new TableRow({
-                  children: [
-                    ...cells,
-                    foodCell,
-                    purposeCell,
-                  ],
-                });
-              }),
-            ],
-          }),
-
+          // Certificates
           new Paragraph({
-            spacing: { before: 300, after: 100 },
+            spacing: { before: 40, after: 40, line: 260 },
             children: [
               new TextRun({
                 text: "Certified that the amount charged as food bill was actually incurred by me.",
-                font: DEFAULT_FONT,
-                size: DEFAULT_SIZE,
-              }),
-            ],
+                size: 18,
+                font: DEFAULT_FONT
+              })
+            ]
           }),
           new Paragraph({
-            spacing: { before: 100, after: 300 },
+            spacing: { before: 40, after: 120, line: 260 },
             children: [
               new TextRun({
                 text: "It is also certified that vouchers were not given by the vendors for the food taken.",
-                font: DEFAULT_FONT,
-                size: DEFAULT_SIZE,
-              }),
-            ],
+                size: 18,
+                font: DEFAULT_FONT
+              })
+            ]
           }),
 
+          // Summary Section
+          summaryTable,
+
+          // Amount in words
+          new Paragraph({
+            alignment: AlignmentType.RIGHT,
+            spacing: { before: 60, after: 140 },
+            children: [
+              new TextRun({
+                text: `(Rs. ${cleanText(currencyWords)} only)`,
+                bold: true,
+                size: 18,
+                font: DEFAULT_FONT
+              })
+            ]
+          }),
+
+          // Signature section
           new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: {
@@ -944,85 +1732,73 @@ export const generateTACalculationsDoc = async (
               left: { style: BorderStyle.NONE },
               right: { style: BorderStyle.NONE },
               insideHorizontal: { style: BorderStyle.NONE },
-              insideVertical: { style: BorderStyle.NONE },
+              insideVertical: { style: BorderStyle.NONE }
             },
             rows: [
-              createBorderlessRow(
-                totalBikeKm > 200 
-                  ? `Total No. of Kilometers Utilized through Two Wheelers ${totalBikeKm} km (Only 200 km charged) x Rs.15`
-                  : `Total No. of Kilometers Utilized through Two Wheelers ${totalBikeKm} x Rs.15`, 
-                `Rs. ${bikeCharges > 0 ? bikeCharges : 'Nil'}`
-              ),
-              createBorderlessRow(`Total Bus Fare paid`, `Rs. ${totalBusFare > 0 ? totalBusFare : 'Nil'}`),
-              createBorderlessRow(`Amount of Food charges claimed`, `Rs. ${totalFoodCharges > 0 ? totalFoodCharges : 'Nil'}`),
-              createBorderlessRow(`Total amount of locally journey performed`, `Rs. Nil`),
-              createBorderlessRow(`Total Amount for Lodging`, `Rs. Nil`),
-              createBorderlessRow(`Total`, `Rs. ${totalAmount > 0 ? totalAmount.toFixed(1) : 'Nil'}`),
-              createBorderlessRow(`Less Advance Taken`, `Rs. Nil`),
-              createBorderlessRow(`Net Amount Claimed`, `Rs. ${netAmountClaimed > 0 ? netAmountClaimed : 'Nil'}`, true),
-            ],
-          }),
-
-          new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            spacing: { before: 100, after: 400 },
-            children: [
-              new TextRun({
-                text: `(Rs. ${cleanText(currencyWords)} only)`,
-                bold: true,
-                size: DEFAULT_SIZE,
-                font: DEFAULT_FONT,
-              }),
-            ],
-          }),
-
-          // Signature and Submission Section below Table
-          new Paragraph({ spacing: { before: 800 } }),
-          new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            children: [
-              new TextRun({ text: cleanText(metadata.name), bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })
+              new TableRow({
+                children: [
+                  new TableCell({
+                    width: { size: 50, type: WidthType.PERCENTAGE },
+                    borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+                    children: [
+                      new Paragraph({
+                        spacing: { before: 180, after: 20 },
+                        children: [new TextRun({ text: "To", bold: true, size: 18, font: DEFAULT_FONT })]
+                      }),
+                      new Paragraph({
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: "The SPO’s Cuddalore Division Cuddalore-607001.", size: 18, font: DEFAULT_FONT })]
+                      })
+                    ]
+                  }),
+                  new TableCell({
+                    width: { size: 50, type: WidthType.PERCENTAGE },
+                    borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+                    children: [
+                      new Paragraph({
+                        alignment: AlignmentType.RIGHT,
+                        spacing: { before: 180, after: 20 },
+                        children: [new TextRun({ text: cleanText(metadata.name), bold: true, size: 18, font: DEFAULT_FONT })]
+                      }),
+                      new Paragraph({
+                        alignment: AlignmentType.RIGHT,
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: `${cleanText(designation)},`, bold: true, size: 18, font: DEFAULT_FONT })]
+                      }),
+                      new Paragraph({
+                        alignment: AlignmentType.RIGHT,
+                        spacing: { before: 20, after: 20 },
+                        children: [new TextRun({ text: `${cleanText(metadata.office || attachedOffice)}.`, bold: true, size: 18, font: DEFAULT_FONT })]
+                      })
+                    ]
+                  })
+                ]
+              })
             ]
-          }),
-          new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            children: [
-              new TextRun({ text: `${cleanText(designation)},`, bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })
-            ]
-          }),
-          new Paragraph({
-            alignment: AlignmentType.RIGHT,
-            children: [
-              new TextRun({ text: `${cleanText(metadata.office)}.`, bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })
-            ]
-          }),
-
-          new Paragraph({ spacing: { before: 400 } }),
-          new Paragraph({
-            alignment: AlignmentType.LEFT,
-            children: [
-              new TextRun({ text: "Submitted to:", bold: true, size: DEFAULT_SIZE, font: DEFAULT_FONT })
-            ]
-          }),
-          new Paragraph({
-            alignment: AlignmentType.LEFT,
-            children: [
-              new TextRun({ text: "The SPO’s Cuddalore Division Cuddalore-607001.", size: DEFAULT_SIZE, font: DEFAULT_FONT })
-            ]
-          }),
-        ],
-      },
-    ],
+          })
+        ]
+      }
+    ]
   });
 
   const blob = await Packer.toBlob(doc);
-  const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
-  const monthName = monthNames[metadata.month] || "June";
-  const fileName = `TA Calculation-${monthName} ${metadata.year}.docx`;
-  saveAs(blob, fileName);
+  const fileName = `TA Calculation-${monthName} ${year}.docx`;
+  await saveAs(blob, fileName);
+};
+
+export const generateTACalculationsDoc = async (
+  metadata: DiaryMetadata,
+  activities: ActivityEntry[],
+  movements: MovementEntry[],
+  serviceCalls?: ServiceCallReport[],
+  attachedOffice: string = "Kurinjipadi S.O",
+  officesDb: OfficeDatabaseEntry[] = [],
+  format: 'excel' | 'word' = 'excel'
+) => {
+  if (format === 'word') {
+    return generateTACalculationsDocx(metadata, activities, movements, serviceCalls, attachedOffice, officesDb);
+  }
+  return generateTACalculationsExcel(metadata, activities, movements, serviceCalls, attachedOffice, officesDb);
 };
 
 export function toSentenceCase(text: string): string {

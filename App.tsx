@@ -9,6 +9,9 @@ import {
   MapPin, 
   FileText, 
   ChevronRight, 
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   Plus,
   PlusCircle,
   Save,
@@ -32,14 +35,32 @@ import {
   Search,
   Bell,
   Clock,
-  RotateCcw
+  RotateCcw,
+  RefreshCw,
+  QrCode,
+  Smartphone,
+  Laptop,
+  ArrowLeftRight,
+  CloudUpload,
+  KeyRound,
+  Package,
+  Wifi,
+  WifiOff,
+  HardDrive
 } from 'lucide-react';
 import { DiaryMetadata, ActivityEntry, MovementEntry, OfficeVisit, OfficeDatabaseEntry, InterOfficeRouteEntry, ServiceCallReport } from './types';
 import { getFortnightDays, formatDate, formatDay, to24hDot, isMonthCompleted, normalizeDateStr } from './utils/dateUtils';
-import { generateWordDoc, generateTACalculationsDoc, generateServiceCallReportDoc, generateMultipleServiceCallReportsDoc, generateTABillDoc } from './services/docGenerator';
+import { generateWordDoc, generateTACalculationsDoc, generateTACalculationsExcel, generateServiceCallReportDoc, generateMultipleServiceCallReportsDoc, generateTABillDoc } from './services/docGenerator';
 import { ServiceCallReportGenerator } from './components/ServiceCallReportGenerator';
-import { googleSignIn, initAuth, googleSignOut } from './services/firebaseAuth';
-import { getOrCreateFolder, uploadFileToGoogleDrive, listBackupFiles, downloadFileContent } from './services/googleDrive';
+import { DatabaseSettingsTab } from './components/DatabaseSettingsTab';
+import { ProfileSettingsTab } from './components/ProfileSettingsTab';
+import { MonthWiseDataManagement } from './components/MonthWiseDataManagement';
+import { PinSyncModal } from './components/PinSyncModal';
+import { OfflinePackageModal } from './components/OfflinePackageModal';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { ModeSelector } from './components/ModeSelector';
+import { BikeOptimizerModal, CandidateDay } from './components/BikeOptimizerModal';
 import logo from './src/assets/images/logo-sa-diary.png';
 
 
@@ -361,12 +382,12 @@ const getDefaultOfficeSpecs = (fromOffice: string, toOffice: string) => {
   if (f.startsWith("neyveli 3") || f.startsWith("neyveli 3 so")) {
     const specs: Record<string, { distanceBus: number, distanceBike: number, durationBus: number, durationBike: number, fareBus?: number }> = {
       "neyveli 2": { distanceBus: 17, distanceBike: 17, durationBus: 30, durationBike: 30, fareBus: 15 },
-      "neyveli ts 2": { distanceBus: 10, distanceBike: 10, durationBus: 20, durationBike: 20, fareBus: 10 },
+      "neyveli ts 2": { distanceBus: 10, distanceBike: 10, durationBus: 20, durationBike: 20, fareBus: 12 },
       "gandhinagar": { distanceBus: 12, distanceBike: 12, durationBus: 30, durationBike: 30, fareBus: 15 },
       "gandhi nagar": { distanceBus: 12, distanceBike: 12, durationBus: 30, durationBike: 30, fareBus: 15 },
-      "neyveli second mine": { distanceBus: 14, distanceBike: 14, durationBus: 20, durationBike: 20, fareBus: 10 },
+      "neyveli second mine": { distanceBus: 14, distanceBike: 14, durationBus: 20, durationBike: 20, fareBus: 12 },
       "neyveli second mines": { distanceBus: 16, distanceBike: 16, durationBus: 25, durationBike: 25, fareBus: 15 },
-      "neyveli ii thermal": { distanceBus: 10, distanceBike: 10, durationBus: 25, durationBike: 20, fareBus: 10 },
+      "neyveli ii thermal": { distanceBus: 10, distanceBike: 10, durationBus: 25, durationBike: 20, fareBus: 12 },
       "block 10": { distanceBus: 4, distanceBike: 4, durationBus: 15, durationBike: 15, fareBus: 5 },
       "neyveli 1": { distanceBus: 4, distanceBike: 4, durationBus: 15, durationBike: 15, fareBus: 5 },
       "panruti west": { distanceBus: 28, distanceBike: 28, durationBus: 75, durationBike: 60, fareBus: 35 },
@@ -509,7 +530,7 @@ const SPOKE_DURATIONS: Record<string, number> = {
 
 const HUB_MAPPING: Record<string, { bsName: string, hubKm: number, spokeKm: number }> = {
   "Cuddalore HO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 2 },
-  "Cuddalore DO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 2 },
+  "Cuddalore DO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 2.5 },
   "Tiruvendhipuram SO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 7 },
   "Vandipalayam SO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 3.5 },
   "Manjakuppam SO": { bsName: "CUDDALORE BUS STAND", hubKm: 35, spokeKm: 4 },
@@ -527,7 +548,7 @@ const HUB_MAPPING: Record<string, { bsName: string, hubKm: number, spokeKm: numb
 };
 
 const SPOKE_TO_HUB_BUS: Record<string, number> = {
-  "Kurinjipadi SO": 35, "Kullanchavadi SO": 35, "Alapakkam SO": 35, "Cuddalore HO": 2, "Cuddalore DO": 2,
+  "Kurinjipadi SO": 35, "Kullanchavadi SO": 35, "Alapakkam SO": 35, "Cuddalore HO": 2, "Cuddalore DO": 2.5,
   "Tiruvendhipuram SO": 7, "Vandipalayam SO": 3.5, "Manjakuppam SO": 4, "Kondur SO": 7, "Varakkalpattu SO": 9,
   "Nellikkuppam SO": 13, "Melpattambakkam SO": 10, "Kilkavarapattu SO": 6, "CN Palayam SO": 21,
   "Sipcot SO": 4, "Cuddalore OT SO": 5, "Cuddalore OT Bazaar SO": 5, "Tirupadiripuliyur SO": 3,
@@ -542,12 +563,12 @@ const INTER_OFFICE_DATA: Record<string, Record<string, { km: string, mode?: stri
   "Kurinjipadi SO": { "Kullanchavadi SO": { km: "15", dur: 20 }, "Alapakkam SO": { km: "22", dur: 35 }, "Cuddalore OT SO": { km: "25", dur: 40 }, "Cuddalore OT Bazaar SO": { km: "25", dur: 40 }, "CN Palayam SO": { km: "20", dur: 40 }, "Cuddalore HO": { km: "32", dur: 50 } },
   "Kullanchavadi SO": { "Kurinjipadi SO": { km: "15", dur: 20 }, "Alapakkam SO": { km: "7", dur: 20 }, "Cuddalore OT SO": { km: "10", dur: 20 }, "Cuddalore OT Bazaar SO": { km: "10", dur: 20 }, "CN Palayam SO": { km: "20", dur: 40 }, "Cuddalore HO": { km: "17", dur: 30 } },
   "Alapakkam SO": { "Kullanchavadi SO": { km: "7", dur: 20 }, "Kurinjipadi SO": { km: "22", dur: 30 }, "Cuddalore OT SO": { km: "15", dur: 20 }, "Cuddalore OT Bazaar SO": { km: "15", dur: 20 }, "CN Palayam SO": { km: "27", dur: 50 }, "Cuddalore HO": { km: "20", dur: 35 } },
-  "Cuddalore OT SO": { "Cuddalore OT Bazaar SO": { km: "0.5", dur: 10, mode: "WALK" }, "Kurinjipadi SO": { km: "25", dur: 40 }, "Kullanchavadi SO": { km: "10", dur: 20 }, "Alapakkam SO": { km: "14", dur: 30 }, "Cuddalore HO": { km: "7", dur: 15 } },
-  "Cuddalore OT Bazaar SO": { "Tirupadiripuliyur SO": { km: "5", dur: 10 }, "Cuddalore OT SO": { km: "0.5", dur: 10, mode: "WALK" }, "Kurinjipadi SO": { km: "25", dur: 40 }, "Kullanchavadi SO": { km: "10", dur: 20 }, "Cuddalore HO": { km: "7", dur: 15 } },
+  "Cuddalore OT SO": { "Cuddalore OT Bazaar SO": { km: "0.5", dur: 10, mode: "WALK" }, "Kurinjipadi SO": { km: "25", dur: 40 }, "Kullanchavadi SO": { km: "10", dur: 20 }, "Alapakkam SO": { km: "14", dur: 30 }, "Cuddalore HO": { km: "7", dur: 25 } },
+  "Cuddalore OT Bazaar SO": { "Tirupadiripuliyur SO": { km: "5", dur: 10 }, "Cuddalore OT SO": { km: "0.5", dur: 10, mode: "WALK" }, "Kurinjipadi SO": { km: "25", dur: 40 }, "Kullanchavadi SO": { km: "10", dur: 20 }, "Cuddalore HO": { km: "7", dur: 25 } },
   "Fort St David SO": { "Cuddalore DO": { km: "1.5", dur: 5 }, "Cuddalore HO": { km: "3.5", dur: 15 }, "Cuddalore Public Offices SO": { km: "1.5", dur: 5 } },
   "Cuddalore DO": { "Cuddalore HO": { km: "2", dur: 10 }, "Fort St David SO": { km: "1.5", dur: 5 }, "Cuddalore Public Offices SO": { km: "2", dur: 10 }, "Kondur SO": { km: "5", dur: 15 }, "Tirupadiripuliyur SO": { km: "2", dur: 10 }, "Nellikkuppam SO": { km: "13", dur: 30 } },
   "Cuddalore Public Offices SO": { "Fort St David SO": { km: "3", dur: 5 }, "Cuddalore HO": { km: "2", dur: 5 }, "Cuddalore DO": { km: "1.5", dur: 10 } },
-  "Cuddalore HO": { "Cuddalore DO": { km: "2", dur: 10 }, "Manjakuppam SO": { km: "2", dur: 10 }, "Varakkalpattu SO": { km: "7", dur: 30 }, "Vandipalayam SO": { km: "5", dur: 15 }, "Cuddalore OT SO": { km: "7", dur: 20 }, "Tirupadiripuliyur West SO": { km: "4", dur: 15 }, "Tirupadiripuliyur SO": { km: "2", dur: 10 }, "Kondur SO": { km: "5", dur: 15 }, "Fort St David SO": { km: "4", dur: 15 }, "Cuddalore Public Offices SO": { km: "2", dur: 10 }, "Nellikkuppam SO": { km: "11", dur: 30 } },
+  "Cuddalore HO": { "Cuddalore DO": { km: "2", dur: 10 }, "Manjakuppam SO": { km: "2", dur: 10 }, "Varakkalpattu SO": { km: "7", dur: 30 }, "Vandipalayam SO": { km: "5", dur: 15 }, "Cuddalore OT SO": { km: "7", dur: 25 }, "Tirupadiripuliyur West SO": { km: "4", dur: 15 }, "Tirupadiripuliyur SO": { km: "2", dur: 10 }, "Kondur SO": { km: "5", dur: 15 }, "Fort St David SO": { km: "4", dur: 15 }, "Cuddalore Public Offices SO": { km: "2", dur: 10 }, "Nellikkuppam SO": { km: "11", dur: 30 } },
   "Vandipalayam SO": { "Tiruvendhipuram SO": { km: "4", dur: 15 }, "Tirupadiripuliyur West SO": { km: "3", dur: 10 }, "Tirupadiripuliyur SO": { km: "3", dur: 10 }, "Cuddalore HO": { km: "5.5", dur: 15 } },
   "Tiruvendhipuram SO": { "Tirupadiripuliyur SO": { km: "6", dur: 15 }, "Tirupadiripuliyur West SO": { km: "2", dur: 10 }, "CN Palayam SO": { km: "14", dur: 30 }, "Cuddalore HO": { km: "9", dur: 15 } },
   "Nellikkuppam Bazzar SO": { "Nellikkuppam SO": { km: "1", dur: 5 }, "Melpattambakkam SO": { km: "5", dur: 15 }, "Kilkavarapattu SO": { km: "10", dur: 25 }, "Kondur SO": { km: "7", dur: 20 }, "Cuddalore HO": { km: "11", dur: 30 } },
@@ -565,9 +586,9 @@ const INTER_OFFICE_DATA: Record<string, Record<string, { km: string, mode?: stri
   // Muthvel R (Neyveli 3 S.O Base) Route Mappings
   "Neyveli 3 S.O": {
     "Neyveli 2 S.O": { km: "17", dur: 30, mode: "Bike", fare: 15 },
-    "Neyveli TS 2 S.O": { km: "10", dur: 20, mode: "Bike", fare: 10 },
+    "Neyveli TS 2 S.O": { km: "10", dur: 20, mode: "Bike", fare: 12 },
     "Gandhinagar S.O": { km: "12", dur: 30, mode: "Bike", fare: 15 },
-    "Neyveli Second MineS.O": { km: "14", dur: 20, mode: "Bike", fare: 10 },
+    "Neyveli Second MineS.O": { km: "14", dur: 20, mode: "Bike", fare: 12 },
     "Block 10,neyveli S.O": { km: "2", dur: 15, mode: "Bike", fare: 5 },
     "Neyveli 1 S.O": { km: "4", dur: 15, mode: "Bike", fare: 5 },
     "Panruti West S.O": { km: "28", dur: 75, mode: "Bus", fare: 35 },
@@ -587,7 +608,7 @@ const INTER_OFFICE_DATA: Record<string, Record<string, { km: string, mode?: stri
   },
   "Neyveli Second MineS.O": {
     "Neyveli 2 S.O": { km: "14", dur: 25, mode: "Bike" },
-    "Neyveli 3 S.O": { km: "14", dur: 20, mode: "Bike", fare: 10 }
+    "Neyveli 3 S.O": { km: "14", dur: 20, mode: "Bike", fare: 12 }
   },
   "Block 10,neyveli S.O": {
     "Neyveli 1 S.O": { km: "2", dur: 10, mode: "Bike" },
@@ -617,8 +638,8 @@ const INTER_OFFICE_DATA: Record<string, Record<string, { km: string, mode?: stri
   },
   "Tiruthuraiyur S.O": {
     "Puthupet (CDL) S.O": { km: "5", dur: 15, mode: "Bus", fare: 6 },
-    "Panruti East S.O": { km: "6", dur: 35, mode: "Bus", fare: 10 },
-    "Panruti West S.O": { km: "8", dur: 20, mode: "Bus", fare: 10 },
+    "Panruti East S.O": { km: "6", dur: 35, mode: "Bus", fare: 12 },
+    "Panruti West S.O": { km: "8", dur: 20, mode: "Bus", fare: 12 },
     "Neyveli 3 S.O": { km: "35", dur: 90, mode: "Bus", fare: 32 }
   },
   "Kadambuliyur S.O": {
@@ -691,10 +712,6 @@ const App: React.FC = () => {
     }
   });
 
-  // Google Drive states
-  const [isDriveBackingUp, setIsDriveBackingUp] = useState<boolean>(false);
-  const [isDriveRestoring, setIsDriveRestoring] = useState<boolean>(false);
-  const [driveBackups, setDriveBackups] = useState<any[] | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<any | null>(null);
   const [bikeOptBackup, setBikeOptBackup] = useState<any | null>(() => {
     try {
@@ -724,9 +741,6 @@ const App: React.FC = () => {
   const loadedProfileRef = useRef<string>(
     localStorage.getItem('diary_active_profile') || "Default Profile"
   );
-
-  const isFirstSyncEffectRef = useRef(true);
-  const lastSavedPayloadRef = useRef<any>(null);
 
   const [metadata, setMetadata] = useState<DiaryMetadata>(() => {
     const today = new Date();
@@ -938,204 +952,84 @@ const App: React.FC = () => {
   const [showExportTAModal, setShowExportTAModal] = useState(false);
   const [exportTAMonth, setExportTAMonth] = useState<number>(0);
   const [exportTAYear, setExportTAYear] = useState<number>(2026);
+  const [exportTAFormat, setExportTAFormat] = useState<'excel' | 'word'>('excel');
+
+  // Direct Cross-Device Sync State (Mobile <-> PC)
+  const detectedDevice = useMemo(() => {
+    if (typeof window === 'undefined') return 'PC';
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ? 'Mobile' : 'PC';
+  }, []);
+
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<{
+    hasData: boolean;
+    updatedAt: number;
+    device: string | null;
+    profileName: string | null;
+  }>({ hasData: false, updatedAt: 0, device: null, profileName: null });
+  const [lastLocalSyncTime, setLastLocalSyncTime] = useState<number>(() => {
+    const saved = localStorage.getItem('diary_last_cloud_sync_time');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+  const [hasNewCloudData, setHasNewCloudData] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error' | 'info'; message: string; sub?: string } | null>(null);
+
+  // User-Selected Operating Mode: 'online' vs 'offline'
+  const [operatingMode, setOperatingMode] = useState<'online' | 'offline'>(() => {
+    try {
+      const saved = localStorage.getItem('diary_operating_mode');
+      if (saved === 'offline' || saved === 'online') return saved;
+    } catch (e) {}
+    return 'online';
+  });
+
+  const handleSetOperatingMode = useCallback((mode: 'online' | 'offline') => {
+    setOperatingMode(mode);
+    try {
+      localStorage.setItem('diary_operating_mode', mode);
+    } catch (e) {}
+    if (mode === 'offline') {
+      setSyncToast({
+        type: 'info',
+        message: 'Switched to Offline Mode',
+        sub: 'Working 100% locally on this device. Cloud sync is paused.'
+      });
+      setTimeout(() => setSyncToast(null), 4000);
+    } else {
+      setSyncToast({
+        type: 'success',
+        message: 'Switched to Online Mode',
+        sub: 'Cloud synchronization & cross-device PIN transfers enabled.'
+      });
+      setTimeout(() => setSyncToast(null), 4000);
+    }
+  }, []);
+
+  // 6-Digit PIN Cloud Sync Modal states
+  const [showPinSyncModal, setShowPinSyncModal] = useState(false);
+  const [pinSyncInitialMode, setPinSyncInitialMode] = useState<'upload' | 'download'>('upload');
+  const [showOfflinePackageModal, setShowOfflinePackageModal] = useState(false);
+
+  // Auto-detect incoming PIN parameters on mount (e.g. ?pin=123456)
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pinFromUrl = urlParams.get('pin') || urlParams.get('qrPin') || urlParams.get('importPin');
+      if (pinFromUrl) {
+        setPinSyncInitialMode('download');
+        setShowPinSyncModal(true);
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    } catch (e) {
+      console.warn("URL query param parse error", e);
+    }
+  }, []);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'scr' | 'entry' | 'summary' | 'movements' | 'database'>('entry');
   const [showAllMonths, setShowAllMonths] = useState(false);
   const [selectedHistoricalMonth, setSelectedHistoricalMonth] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState(false);
-  const [syncTextInput, setSyncTextInput] = useState('');
-  const [syncPinInput, setSyncPinInput] = useState('');
-  const [activeCloudPin, setActiveCloudPin] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-
-  // Persistent Web Storage Sync States (Disabled - 100% Offline Mode)
-  const [webSyncUser, setWebSyncUser] = useState<{ email: string; passcode: string } | null>(null);
-  const [webSyncStatus, setWebSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'loading'>('idle');
-  const [webSyncErrorMessage, setWebSyncErrorMessage] = useState('');
-  const [isInitialSyncCompleted, setIsInitialSyncCompleted] = useState(true);
-  const [webSyncBackups, setWebSyncBackups] = useState<Array<{ payload: any; updatedAt: number; device?: string }>>([]);
-  const [webSyncUpdatedAt, setWebSyncUpdatedAt] = useState<number | null>(null);
-  const [activeCloudPayload, setActiveCloudPayload] = useState<any | null>(null);
-  const [syncConflict, setSyncConflict] = useState<{
-    cloudPayload: any;
-    cloudUpdatedAt: number;
-    cloudDevice: string;
-  } | null>(null);
-
-  // Free up local storage quota immediately & disable cloud sync
-  useEffect(() => {
-    try {
-      localStorage.removeItem('diary_websync_active_payload');
-      localStorage.removeItem('diary_websync_user');
-      localStorage.removeItem('diary_websync_updated_at');
-    } catch (e) {
-      console.warn('Failed to clean up diary_websync_active_payload:', e);
-    }
-  }, []);
-
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPasscode, setLoginPasscode] = useState('');
-
-  const getLocalStorageSyncPayload = () => {
-    const payload: Record<string, string> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('diary_') && !key.startsWith('diary_websync_')) {
-        payload[key] = localStorage.getItem(key) || '';
-      }
-    }
-    
-    // Inject latest in-memory React state to guarantee no stale values during sync
-    const prefix = isSystemDefaultProfile(activeProfile) ? "diary_" : `diary_profile_${activeProfile}_`;
-    payload[`${prefix}metadata`] = JSON.stringify(metadata);
-    payload[`${prefix}activities`] = JSON.stringify(activities);
-    payload[`${prefix}movements`] = JSON.stringify(movements);
-    payload[`${prefix}attached_office`] = attachedOffice;
-    payload[`${prefix}offices_db`] = JSON.stringify(officesDb);
-    payload[`${prefix}service_calls`] = JSON.stringify(serviceCalls);
-    payload[`${prefix}scr_defaults`] = JSON.stringify(scrDefaults);
-    payload['diary_profiles_list'] = JSON.stringify(profiles);
-    payload['diary_active_profile'] = activeProfile;
-    if (!payload['diary_last_updated']) {
-      payload['diary_last_updated'] = localStorage.getItem('diary_last_updated') || Date.now().toString();
-    }
-    
-    return payload;
-  };
-
-  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 4, delay = 1500): Promise<Response> => {
-    try {
-      const response = await fetch(url, options);
-      if (!response.ok && retries > 0) {
-        const definitiveStatuses = [400, 401, 403, 409];
-        if (!definitiveStatuses.includes(response.status)) {
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return fetchWithRetry(url, options, retries - 1, delay * 1.5);
-        }
-      }
-      
-      // If it's an API route and we get HTML (e.g., due to offline fallback, SPA fallback or service worker)
-      if (url.startsWith('/api/')) {
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('text/html')) {
-          throw new Error('Server returned HTML instead of JSON. Please refresh the page, clear your service worker cache, or check your internet connection.');
-        }
-      }
-      
-      return response;
-    } catch (error) {
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return fetchWithRetry(url, options, retries - 1, delay * 1.5);
-      }
-      throw error;
-    }
-  };
-
-  const syncWorkspaceToWebStorage = async (_customUser?: { email: string; passcode: string }, _customPayload?: any, _isForced?: boolean) => {
-    // 100% Offline Local Storage Mode - Cloud sync disabled by user request
-    return;
-  };
-
-  useEffect(() => {
-    const initCloudProfile = async () => {
-      if (!webSyncUser) {
-        setIsInitialSyncCompleted(true);
-        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
-        return;
-      }
-
-      // Check sessionStorage reload guard to prevent loops
-      if (sessionStorage.getItem('diary_sync_reloaded') === '1') {
-        sessionStorage.removeItem('diary_sync_reloaded');
-        setWebSyncStatus('synced');
-        setIsInitialSyncCompleted(true);
-        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
-        return;
-      }
-
-      setWebSyncStatus('loading');
-      try {
-        const response = await fetchWithRetry('/api/web-storage/register-or-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: webSyncUser.email,
-            passcode: webSyncUser.passcode,
-            device: getDeviceType()
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: 'Login failed' }));
-          throw new Error(errorData.message || 'Authentication error.');
-        }
-
-        const resData = await response.json();
-        if (resData.success) {
-          if (resData.history) {
-            setWebSyncBackups(resData.history);
-          }
-          if (resData.updatedAt) {
-            localStorage.setItem('diary_websync_updated_at', resData.updatedAt.toString());
-            setWebSyncUpdatedAt(resData.updatedAt);
-          }
-          if (resData.payload) {
-            setActiveCloudPayload(resData.payload);
-            
-            const cloudPayload = resData.payload;
-            const cloudTimestamp = parseInt(cloudPayload['diary_last_updated'] || '0', 10);
-            const localTimestamp = parseInt(localStorage.getItem('diary_last_updated') || '0', 10);
-
-            const hasLocalTimestamp = !!localStorage.getItem('diary_last_updated');
-            let shouldPull = false;
-
-            if (cloudTimestamp > 0 || localTimestamp > 0) {
-              shouldPull = (cloudTimestamp > localTimestamp) || (!hasLocalTimestamp && cloudTimestamp > 0);
-            } else {
-              // Legacy fallback if no timestamps are present: do identicalness check
-              let isIdentical = true;
-              Object.entries(cloudPayload).forEach(([key, val]) => {
-                if (localStorage.getItem(key) !== val) {
-                  isIdentical = false;
-                }
-              });
-              shouldPull = !isIdentical;
-            }
-
-            if (shouldPull) {
-              // Restore entire payload from cloud!
-              Object.entries(cloudPayload).forEach(([key, val]) => {
-                if (typeof val === 'string') {
-                  localStorage.setItem(key, val);
-                }
-              });
-              sessionStorage.setItem('diary_sync_reloaded', '1');
-              setWebSyncStatus('synced');
-              window.location.reload();
-              return;
-            }
-          }
-        }
-        
-        // If identical or no payload, we are active & synced!
-        setWebSyncStatus('synced');
-        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
-        setIsInitialSyncCompleted(true);
-      } catch (err: any) {
-        console.error('[Web Storage Initial Load] Error:', err);
-        setWebSyncStatus('error');
-        setWebSyncErrorMessage(err.message || 'Connection lost.');
-        lastSavedPayloadRef.current = getLocalStorageSyncPayload();
-        setIsInitialSyncCompleted(true);
-      }
-    };
-
-    initCloudProfile();
-  }, []);
-
   const availableDays = useMemo(() => getFortnightDays(metadata.year, metadata.month, metadata.fortnight), [metadata.year, metadata.month, metadata.fortnight]);
 
   const [activities, setActivities] = useState<ActivityEntry[]>(() => {
@@ -1198,6 +1092,89 @@ const App: React.FC = () => {
     return merged.sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
   };
 
+  const migrateOfficesDb = (list: OfficeDatabaseEntry[]): OfficeDatabaseEntry[] => {
+    if (!Array.isArray(list)) return [];
+    const updated = list.map(item => {
+      if (!item) return item;
+      let cleaned = { ...item };
+      if (cleaned.fareBus === 10) {
+        cleaned.fareBus = 12;
+      }
+      // Auto-correct inverted hub/spoke legs where Kilkavarapattu SO is origin via Panruti Bus Stand
+      if (
+        cleaned.fromOffice?.toLowerCase().includes('kilkavarapattu') &&
+        cleaned.viaBusStand?.toLowerCase().includes('panruti') &&
+        cleaned.fromOfficeToBsKm !== undefined &&
+        cleaned.fromOfficeToBsKm > 10 &&
+        cleaned.toOfficeToBsKm === 6
+      ) {
+        const tempKm = cleaned.fromOfficeToBsKm;
+        cleaned.fromOfficeToBsKm = cleaned.toOfficeToBsKm;
+        cleaned.toOfficeToBsKm = tempKm;
+        const tempMins = cleaned.fromOfficeToBsMins;
+        cleaned.fromOfficeToBsMins = cleaned.toOfficeToBsMins;
+        cleaned.toOfficeToBsMins = tempMins;
+        const tempFare = cleaned.fromOfficeToBsFare;
+        cleaned.fromOfficeToBsFare = cleaned.toOfficeToBsFare;
+        cleaned.toOfficeToBsFare = tempFare;
+      }
+
+      // Ensure Cuddalore HO and Cuddalore DO distance to/from Cuddalore Bus Stand strictly matches the office matrix database:
+      // Cuddalore HO <-> Cuddalore Bus Stand is 2 KM
+      // Cuddalore DO <-> Cuddalore Bus Stand is 2.5 KM
+      if (cleaned.viaBusStand && cleaned.viaBusStand.toLowerCase().includes('cuddalore')) {
+        if (tNorm.includes('cuddalore ho')) {
+          cleaned.toOfficeToBsKm = 2;
+          cleaned.toOfficeToBsMins = cleaned.toOfficeToBsMins || 10;
+        }
+        if (fNorm.includes('cuddalore ho')) {
+          cleaned.fromOfficeToBsKm = 2;
+          cleaned.fromOfficeToBsMins = cleaned.fromOfficeToBsMins || 10;
+        }
+        if (tNorm.includes('cuddalore do')) {
+          cleaned.toOfficeToBsKm = 2.5;
+          cleaned.toOfficeToBsMins = cleaned.toOfficeToBsMins || 10;
+        }
+        if (fNorm.includes('cuddalore do')) {
+          cleaned.fromOfficeToBsKm = 2.5;
+          cleaned.fromOfficeToBsMins = cleaned.fromOfficeToBsMins || 10;
+        }
+      }
+
+      // Ensure Cuddalore OT SO <-> Cuddalore HO travel duration is strictly 25 minutes
+      if (
+        (fNorm.includes('cuddalore ot so') && tNorm.includes('cuddalore ho')) ||
+        (fNorm.includes('cuddalore ho') && tNorm.includes('cuddalore ot so'))
+      ) {
+        cleaned.durationBus = 25;
+        cleaned.durationBike = 25;
+        if (fNorm.includes('cuddalore ho')) {
+          cleaned.fromOfficeToBsMins = 10;
+          cleaned.toOfficeToBsMins = 15;
+          cleaned.fromOfficeToBsKm = 2;
+          cleaned.toOfficeToBsKm = 5;
+        } else {
+          cleaned.fromOfficeToBsMins = 15;
+          cleaned.toOfficeToBsMins = 10;
+          cleaned.fromOfficeToBsKm = 5;
+          cleaned.toOfficeToBsKm = 2;
+        }
+      }
+      return cleaned;
+    });
+
+    // Remove any conflicting inverted duplicate where a forward route from Kurinjipadi exists
+    const hasForwardKurinKilk = updated.some(e => 
+      e.fromOffice?.toLowerCase().includes('kurinjipadi') && e.toOffice?.toLowerCase().includes('kilkavarapattu')
+    );
+    if (hasForwardKurinKilk) {
+      return updated.filter(e => 
+        !(e.fromOffice?.toLowerCase().includes('kilkavarapattu') && e.toOffice?.toLowerCase().includes('kurinjipadi'))
+      );
+    }
+    return updated;
+  };
+
   const getDefaultOfficesAndInterOfficesList = (profileName: string, targetAttachedOffice?: string): OfficeDatabaseEntry[] => {
     const activeAttached = targetAttachedOffice || getProfileAttachedOffice(profileName);
     const baseList = getProfileBaseOffices(profileName);
@@ -1218,7 +1195,7 @@ const App: React.FC = () => {
         fromOfficeToBsMins: mapping ? (SPOKE_DURATIONS[activeAttached] || 60) : 0,
         toOfficeToBsKm: mapping?.spokeKm || 0,
         toOfficeToBsMins: spokeTime,
-        fareBus: (specs as any).fareBus
+        fareBus: (specs as any).fareBus === 10 ? 12 : (specs as any).fareBus
       };
     });
 
@@ -1257,7 +1234,7 @@ const App: React.FC = () => {
           durationBike: spec.dur || 20,
           durationBus: spec.dur || 20,
           transportModeOverriding: spec.mode || '',
-          fareBus: spec.fare,
+          fareBus: spec.fare === 10 ? 12 : spec.fare,
           viaBusStand: viaBs || undefined,
           fromOfficeToBsKm: viaBs ? fromBsKm : undefined,
           fromOfficeToBsMins: viaBs ? fromBsMins : undefined,
@@ -1267,7 +1244,7 @@ const App: React.FC = () => {
       });
     });
 
-    return list.sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
+    return migrateOfficesDb(list.sort((a, b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice)));
   };
 
   const [officesDb, setOfficesDb] = useState<OfficeDatabaseEntry[]>(() => {
@@ -1306,7 +1283,7 @@ const App: React.FC = () => {
               }
             } catch (e) {}
           }
-          return loaded.sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
+          return migrateOfficesDb(loaded).sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice));
         }
       } catch (e) {}
     }
@@ -1422,6 +1399,9 @@ const App: React.FC = () => {
 
   const [filterFromOffice, setFilterFromOffice] = useState<string>('');
   const [filterToOffice, setFilterToOffice] = useState<string>('');
+  const [officeSearchQuery, setOfficeSearchQuery] = useState<string>('');
+  const [officePage, setOfficePage] = useState<number>(1);
+  const [officePageSize, setOfficePageSize] = useState<number | 'all'>(25);
 
   const uniqueFromOffices = useMemo(() => {
     const set = new Set<string>();
@@ -1440,14 +1420,33 @@ const App: React.FC = () => {
   }, [officesDb]);
 
   const filteredOffices = useMemo(() => {
+    const q = officeSearchQuery.trim().toLowerCase();
     return officesDb
       .map((o, originalIdx) => ({ o, originalIdx }))
       .filter(({ o }) => {
         const matchesFrom = !filterFromOffice || o.fromOffice === filterFromOffice;
         const matchesTo = !filterToOffice || o.toOffice === filterToOffice;
-        return matchesFrom && matchesTo;
+        if (!matchesFrom || !matchesTo) return false;
+        if (!q) return true;
+        const fromMatch = (o.fromOffice || '').toLowerCase().includes(q);
+        const toMatch = (o.toOffice || '').toLowerCase().includes(q);
+        const viaMatch = (o.viaBusStand || '').toLowerCase().includes(q);
+        return fromMatch || toMatch || viaMatch;
       });
-  }, [officesDb, filterFromOffice, filterToOffice]);
+  }, [officesDb, filterFromOffice, filterToOffice, officeSearchQuery]);
+
+  const totalOfficePages = useMemo(() => {
+    if (officePageSize === 'all') return 1;
+    const size = typeof officePageSize === 'number' ? officePageSize : 25;
+    return Math.max(1, Math.ceil(filteredOffices.length / size));
+  }, [filteredOffices.length, officePageSize]);
+
+  const paginatedOffices = useMemo(() => {
+    if (officePageSize === 'all') return filteredOffices;
+    const size = typeof officePageSize === 'number' ? officePageSize : 25;
+    const start = (officePage - 1) * size;
+    return filteredOffices.slice(start, start + size);
+  }, [filteredOffices, officePage, officePageSize]);
 
   const currentMonthStr = useMemo(() => String(metadata.month + 1).padStart(2, '0'), [metadata.month]);
   const currentYearStr = useMemo(() => String(metadata.year), [metadata.year]);
@@ -1761,62 +1760,6 @@ const App: React.FC = () => {
     setOfficesDb(getDefaultOfficesAndInterOfficesList(activeProfile, activeAttached));
   };
 
-  // Automatic Background Cloud Save
-  useEffect(() => {
-    if (!isInitialSyncCompleted || !webSyncUser) return;
-
-    if (isFirstSyncEffectRef.current) {
-      isFirstSyncEffectRef.current = false;
-      return;
-    }
-
-    const currentPayload = getLocalStorageSyncPayload();
-    
-    // Safety check: only save if there is an actual change in the data values!
-    if (lastSavedPayloadRef.current) {
-      const keys1 = Object.keys(currentPayload).filter(k => k !== 'diary_last_updated');
-      const keys2 = Object.keys(lastSavedPayloadRef.current).filter(k => k !== 'diary_last_updated');
-      let isIdentical = keys1.length === keys2.length;
-      if (isIdentical) {
-        for (const key of keys1) {
-          if (currentPayload[key] !== lastSavedPayloadRef.current[key]) {
-            isIdentical = false;
-            break;
-          }
-        }
-      }
-      if (isIdentical) {
-        // Content hasn't changed from the last synced state! Prevent accidental override.
-        return;
-      }
-    }
-
-    // Update last saved payload snapshot
-    lastSavedPayloadRef.current = currentPayload;
-
-    // Bump the modification timestamp only because a real user edit occurred
-    localStorage.setItem('diary_last_updated', Date.now().toString());
-
-    const delayDebounce = setTimeout(() => {
-      syncWorkspaceToWebStorage();
-    }, 1200);
-
-    return () => clearTimeout(delayDebounce);
-  }, [
-    metadata,
-    activities,
-    movements,
-    attachedOffice,
-    officesDb,
-    profiles,
-    activeProfile,
-    serviceCalls,
-    isInitialSyncCompleted,
-    webSyncUser
-  ]);
-
-
-
   const switchProfile = (newProfileName: string) => {
     executeSwitchProfile(newProfileName);
   };
@@ -1968,7 +1911,7 @@ const App: React.FC = () => {
         // ignore
       }
     }
-    setOfficesDb(loadedOffices.sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice)));
+    setOfficesDb(migrateOfficesDb(loadedOffices).sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice)));
 
     // Service Calls
     const savedCalls = getNewVal('service_calls');
@@ -2028,26 +1971,6 @@ const App: React.FC = () => {
         }
       }
     }
-
-    // 2. Delete from activeCloudPayload too
-    if (activeCloudPayload) {
-      const nextCloud = { ...activeCloudPayload };
-      Object.keys(nextCloud).forEach(key => {
-        if (isDefault) {
-          if (key.startsWith("diary_") && !key.includes("_profile_") && !key.startsWith("diary_websync_") && key !== "diary_profiles_list" && key !== "diary_active_profile") {
-            delete nextCloud[key];
-          }
-        } else {
-          const matchesAnyPrefix = prefixes.some(p => key.startsWith(p));
-          const matchesExactKey = key === `diary_profile_${profileName}`;
-          const matchesVariantKey = variants.some(v => key === `diary_profile_${v}`);
-          if (matchesAnyPrefix || matchesExactKey || matchesVariantKey) {
-            delete nextCloud[key];
-          }
-        }
-      });
-      setActiveCloudPayload(nextCloud);
-    }
   };
 
   const addNewProfile = (name: string) => {
@@ -2093,17 +2016,6 @@ const App: React.FC = () => {
         }
       }
     }
-    
-    if (!hasPreExistingData && activeCloudPayload) {
-      for (const k of Object.keys(activeCloudPayload)) {
-        if (k !== "diary_profiles_list" && k !== "diary_active_profile") {
-          if (prefixes.some(p => k.startsWith(p)) || variants.some(v => k === `diary_profile_${v}`)) {
-            hasPreExistingData = true;
-            break;
-          }
-        }
-      }
-    }
 
     const proceedCreateFresh = () => {
       // Clear any pre-existing keys for this profile name (exact and variants)
@@ -2115,36 +2027,14 @@ const App: React.FC = () => {
       localStorage.setItem('diary_profiles_list', JSON.stringify(updated));
       switchProfile(trimmed);
       setConfirmModal(null);
-      
-      // Auto-sync
-      setTimeout(() => {
-        syncWorkspaceToWebStorage();
-      }, 200);
     };
 
     const proceedRestore = () => {
-      // If the data is only in the cloud, copy it to localStorage so it gets loaded correctly
-      if (activeCloudPayload) {
-        Object.entries(activeCloudPayload).forEach(([key, val]) => {
-          if (key !== "diary_profiles_list" && key !== "diary_active_profile" && typeof val === 'string') {
-            const isMatch = prefixes.some(p => key.startsWith(p)) || variants.some(v => key === `diary_profile_${v}`);
-            if (isMatch) {
-              localStorage.setItem(key, val);
-            }
-          }
-        });
-      }
-
       const updated = [...profiles, trimmed];
       setProfiles(updated);
       localStorage.setItem('diary_profiles_list', JSON.stringify(updated));
       switchProfile(trimmed);
       setConfirmModal(null);
-      
-      // Auto-sync
-      setTimeout(() => {
-        syncWorkspaceToWebStorage();
-      }, 200);
     };
 
     if (hasPreExistingData) {
@@ -2215,6 +2105,7 @@ const App: React.FC = () => {
   });
   const [leaveType, setLeaveType] = useState<'CL' | 'EL' | ''>('');
   const [workedOnHoliday, setWorkedOnHoliday] = useState<boolean>(false);
+  const [saveSuccessFeedback, setSaveSuccessFeedback] = useState<boolean>(false);
 
   useEffect(() => {
     const day = availableDays[selectedDateIdx];
@@ -2237,18 +2128,21 @@ const App: React.FC = () => {
 
   const [lastPromptedScrId, setLastPromptedScrId] = useState<string | null>(null);
 
-  const cleanHrsToTime = (str: string) => {
-    if (!str) return '11:00';
-    const matched = str.match(/(\d{1,2})[:.](\d{2})/);
+  const cleanHrsToTime = (str: string, fallback: string = '11:00') => {
+    if (!str || typeof str !== 'string') return fallback;
+    const trimmed = str.trim();
+    const matched = trimmed.match(/(\d{1,2})[:.](\d{2})/);
     if (matched) {
       return `${matched[1].padStart(2, '0')}:${matched[2]}`;
     }
-    const singleMatch = str.match(/(\d{1,2})/);
+    const singleMatch = trimmed.match(/(\d{1,2})/);
     if (singleMatch) {
       const num = parseInt(singleMatch[1], 10);
-      return `${String(num).padStart(2, '0')}:00`;
+      if (num >= 0 && num <= 23) {
+        return `${String(num).padStart(2, '0')}:00`;
+      }
     }
-    return str.replace(/\s*hrs\.?/gi, '').trim() || '11:00';
+    return fallback;
   };
 
   const timeToMinutes = (timeStr: string) => {
@@ -2267,7 +2161,7 @@ const App: React.FC = () => {
 
   const handleImportSCRs = (matchingList: any[]) => {
     const sortedList = [...matchingList].sort((a, b) => timeToMinutes(a.timeIn) - timeToMinutes(b.timeIn));
-    const newVisits = sortedList.map((matching) => {
+    const newVisits: OfficeVisit[] = sortedList.map((matching) => {
       const defaultId = Math.random().toString(36).substr(2, 5);
       const problemDescriptions = (matching.problems || [])
         .map((p: any) => {
@@ -2289,17 +2183,21 @@ const App: React.FC = () => {
       } else if (problemDescriptions.length > 2) {
         joinedIssues = problemDescriptions.slice(0, -1).join(', ') + ' and ' + problemDescriptions[problemDescriptions.length - 1];
       } else {
-        joinedIssues = 'Service call report';
+        joinedIssues = (matching.otherIssues && matching.otherIssues !== 'NIL' && matching.otherIssues.trim()) 
+          ? matching.otherIssues.trim() 
+          : 'Service call report';
       }
 
       const hasCallGivenBy = matching.callGivenBy && matching.callGivenBy.trim() !== '';
-      const finalIssues = hasCallGivenBy ? joinedIssues : `to attend ${joinedIssues}`;
+      const finalIssues = (joinedIssues.toLowerCase().startsWith('to attend') || joinedIssues.toLowerCase().startsWith('attended'))
+        ? joinedIssues
+        : (hasCallGivenBy ? joinedIssues : `to attend ${joinedIssues}`);
 
       return {
         id: defaultId,
         officeName: cleanOfficeSpelling(matching.officeAttended),
-        startTime: cleanHrsToTime(matching.timeIn),
-        endTime: cleanHrsToTime(matching.timeOut),
+        startTime: cleanHrsToTime(matching.timeIn, '10:00'),
+        endTime: cleanHrsToTime(matching.timeOut, '17:00'),
         issues: finalIssues,
         resolution: '',
         isManualTime: true
@@ -2316,24 +2214,46 @@ const App: React.FC = () => {
       return isOfficeDefaultOrEmpty && isTimeDefault && isDetailsEmpty;
     };
 
-    let mergedVisits = [];
+    let mergedVisits: OfficeVisit[] = [];
     if (isFormUnmodified(visits)) {
       mergedVisits = newVisits;
     } else {
-      // Filter out SCR entries that are already manually entered (same office and start time)
-      const filteredNewVisits = newVisits.filter(newV => {
-        return !visits.some(existing => 
-          cleanOfficeSpelling(existing.officeName).toLowerCase().trim() === cleanOfficeSpelling(newV.officeName).toLowerCase().trim() &&
-          existing.startTime === newV.startTime
-        );
+      const normAtt = cleanOfficeSpelling(attachedOffice).toLowerCase().trim();
+      const nonDefaultVisits = visits.filter(v => {
+        const normName = v.officeName ? cleanOfficeSpelling(v.officeName).toLowerCase().trim() : '';
+        return normName && normName !== normAtt;
       });
-      mergedVisits = [...visits, ...filteredNewVisits];
+
+      const updatedExisting = nonDefaultVisits.map(existing => {
+        const match = newVisits.find(nv => 
+          cleanOfficeSpelling(nv.officeName).toLowerCase().trim() === cleanOfficeSpelling(existing.officeName).toLowerCase().trim()
+        );
+        if (match) {
+          return {
+            ...existing,
+            startTime: match.startTime,
+            endTime: match.endTime,
+            issues: match.issues || existing.issues,
+            isManualTime: true
+          };
+        }
+        return existing;
+      });
+
+      const brandNewVisits = newVisits.filter(nv => 
+        !updatedExisting.some(ex => 
+          cleanOfficeSpelling(ex.officeName).toLowerCase().trim() === cleanOfficeSpelling(nv.officeName).toLowerCase().trim()
+        )
+      );
+
+      mergedVisits = [...updatedExisting, ...brandNewVisits];
+      if (mergedVisits.length === 0) {
+        mergedVisits = newVisits;
+      }
     }
 
-    // Sort chronologically
     mergedVisits.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
-
-    setVisits(recalculateVisitsSequence(mergedVisits));
+    setVisits(mergedVisits);
   };
 
   useEffect(() => {
@@ -2722,17 +2642,143 @@ const App: React.FC = () => {
     }, 6000);
   };
 
-  const getOfficeDynamicSpecs = (officeName: string) => {
-    const attOff = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-    const destOff = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
-    const matched = officesDb.find(o => {
-      const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      return (fOff === attOff && tOff === destOff) || (fOff === destOff && tOff === attOff);
-    });
+  const matchOfficeNames = useCallback((a: string, b: string): boolean => {
+    if (!a || !b) return false;
+    const cleanA = a.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+    const cleanB = b.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+    if (cleanA === cleanB) return true;
 
-    if (matched && matched.viaBusStand && matched.viaBusStand.trim()) {
-      const isFromAtt = matched.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim() === attOff;
+    // Check if both have distinct office type suffixes (HO, DO, SO, BO)
+    const suffixRegex = /\s+(so|bo|ho|do)$/i;
+    const matchA = cleanA.match(suffixRegex);
+    const matchB = cleanB.match(suffixRegex);
+    
+    // If both specify a suffix and they are different (e.g. HO vs DO, or SO vs BO), they are distinct offices!
+    if (matchA && matchB && matchA[1].toLowerCase() !== matchB[1].toLowerCase()) {
+      return false;
+    }
+
+    // Do NOT match HO or DO loosely to an office with a different or missing suffix
+    if ((matchA && ['ho', 'do'].includes(matchA[1].toLowerCase()) && !matchB) ||
+        (matchB && ['ho', 'do'].includes(matchB[1].toLowerCase()) && !matchA)) {
+      return false;
+    }
+
+    const stripSuffix = (s: string) => s.replace(/\s+(so|bo|ho|do)$/i, '').trim();
+    return stripSuffix(cleanA) === stripSuffix(cleanB);
+  }, []);
+
+  const findOfficeRoute = useCallback((origin: string, dest: string) => {
+    if (!origin || !dest) return null;
+    const norm = (s: string) => s.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+    const origNorm = norm(origin);
+    const destNorm = norm(dest);
+
+    // 1. Direct exact forward match (highest priority)
+    const exactDirect = officesDb.find(o => norm(o.fromOffice) === origNorm && norm(o.toOffice) === destNorm);
+    if (exactDirect) return { entry: exactDirect, isReverse: false };
+
+    // 2. Direct exact reverse match
+    const exactReverse = officesDb.find(o => norm(o.fromOffice) === destNorm && norm(o.toOffice) === origNorm);
+    if (exactReverse) return { entry: exactReverse, isReverse: true };
+
+    // 3. Direct Bus Stand <-> Office lookups directly from officesDb viaBusStand / toOfficeToBsKm / fromOfficeToBsKm
+    const isBsOrigin = origNorm.includes('bus stand');
+    const isBsDest = destNorm.includes('bus stand');
+
+    if (isBsOrigin && !isBsDest) {
+      const match = officesDb.find(o => 
+        (norm(o.toOffice) === destNorm || matchOfficeNames(o.toOffice, dest) ||
+         norm(o.fromOffice) === destNorm || matchOfficeNames(o.fromOffice, dest)) &&
+        o.viaBusStand && norm(o.viaBusStand) === origNorm
+      );
+      if (match) {
+        const isTo = norm(match.toOffice) === destNorm || matchOfficeNames(match.toOffice, dest);
+        const km = isTo ? (match.toOfficeToBsKm ?? 0) : (match.fromOfficeToBsKm ?? 0);
+        const mins = isTo ? (match.toOfficeToBsMins ?? 10) : (match.fromOfficeToBsMins ?? 10);
+        const fare = isTo ? match.toOfficeToBsFare : match.fromOfficeToBsFare;
+        return {
+          entry: {
+            ...match,
+            fromOffice: origin,
+            toOffice: dest,
+            distanceBus: km,
+            distanceBike: km,
+            durationBus: mins,
+            durationBike: mins,
+            viaBusStand: undefined,
+            fareBus: fare
+          },
+          isReverse: false
+        };
+      }
+    }
+
+    if (isBsDest && !isBsOrigin) {
+      const match = officesDb.find(o => 
+        (norm(o.fromOffice) === origNorm || matchOfficeNames(o.fromOffice, origin) ||
+         norm(o.toOffice) === origNorm || matchOfficeNames(o.toOffice, origin)) &&
+        o.viaBusStand && norm(o.viaBusStand) === destNorm
+      );
+      if (match) {
+        const isFrom = norm(match.fromOffice) === origNorm || matchOfficeNames(match.fromOffice, origin);
+        const km = isFrom ? (match.fromOfficeToBsKm ?? 0) : (match.toOfficeToBsKm ?? 0);
+        const mins = isFrom ? (match.fromOfficeToBsMins ?? 10) : (match.toOfficeToBsMins ?? 10);
+        const fare = isFrom ? match.fromOfficeToBsFare : match.toOfficeToBsFare;
+        return {
+          entry: {
+            ...match,
+            fromOffice: origin,
+            toOffice: dest,
+            distanceBus: km,
+            distanceBike: km,
+            durationBus: mins,
+            durationBike: mins,
+            viaBusStand: undefined,
+            fareBus: fare
+          },
+          isReverse: false
+        };
+      }
+    }
+
+    // 4. Fallback loose forward match: origin -> dest
+    const direct = officesDb.find(o => 
+      matchOfficeNames(o.fromOffice, origin) && matchOfficeNames(o.toOffice, dest)
+    );
+    if (direct) return { entry: direct, isReverse: false };
+
+    // 5. Fallback loose reverse match: dest -> origin
+    const reverse = officesDb.find(o => 
+      matchOfficeNames(o.fromOffice, dest) && matchOfficeNames(o.toOffice, origin)
+    );
+    if (reverse) return { entry: reverse, isReverse: true };
+
+    return null;
+  }, [officesDb, matchOfficeNames]);
+
+  const getOfficeDynamicSpecs = (officeName: string) => {
+    let routeMatch = findOfficeRoute(attachedOffice, officeName);
+
+    // If attachedOffice doesn't connect via bus stand or route not found, find ANY route in officesDb containing officeName with viaBusStand
+    if (!routeMatch || !routeMatch.entry.viaBusStand || !routeMatch.entry.viaBusStand.trim()) {
+      const anyMatch = officesDb.find(o => 
+        (matchOfficeNames(o.toOffice, officeName) || matchOfficeNames(o.fromOffice, officeName)) &&
+        o.viaBusStand && o.viaBusStand.trim()
+      );
+      if (anyMatch) {
+        const isTo = matchOfficeNames(anyMatch.toOffice, officeName);
+        routeMatch = {
+          entry: anyMatch,
+          isReverse: !isTo
+        };
+      }
+    }
+
+    if (routeMatch && routeMatch.entry.viaBusStand && routeMatch.entry.viaBusStand.trim()) {
+      const matched = routeMatch.entry;
+      const isFromAtt = !routeMatch.isReverse;
+
       const hubKm = isFromAtt 
         ? (matched.fromOfficeToBsKm !== undefined ? matched.fromOfficeToBsKm : 35)
         : (matched.toOfficeToBsKm !== undefined ? matched.toOfficeToBsKm : 35);
@@ -2749,9 +2795,19 @@ const App: React.FC = () => {
       const hubFare = isFromAtt ? matched.fromOfficeToBsFare : matched.toOfficeToBsFare;
       const spokeFare = isFromAtt ? matched.toOfficeToBsFare : matched.fromOfficeToBsFare;
 
+      const bsName = matched.viaBusStand.trim();
+      let finalSpokeKm = spokeKm;
+      // Strictly enforce office matrix database distances for Cuddalore HO & DO
+      const normOffice = (officeName || '').toLowerCase();
+      if (normOffice.includes('cuddalore ho') && bsName.toUpperCase().includes('CUDDALORE')) {
+        finalSpokeKm = 2;
+      } else if (normOffice.includes('cuddalore do') && bsName.toUpperCase().includes('CUDDALORE')) {
+        finalSpokeKm = 2.5;
+      }
+
       return {
-        bsName: matched.viaBusStand.trim(),
-        spokeKm: spokeKm,
+        bsName,
+        spokeKm: finalSpokeKm,
         spokeDuration: spokeDuration,
         hubKm: hubKm,
         hubDuration: hubDuration,
@@ -2764,18 +2820,25 @@ const App: React.FC = () => {
     if (mapping) {
       const spokeTime = SPOKE_DURATIONS[officeName] || 15;
       const hubTime = HUB_DURATIONS[mapping.bsName] || 60;
+      let finalSpokeKm = mapping.spokeKm;
+      const normOffice = (officeName || '').toLowerCase();
+      if (normOffice.includes('cuddalore ho')) finalSpokeKm = 2;
+      if (normOffice.includes('cuddalore do')) finalSpokeKm = 2.5;
       return {
         bsName: mapping.bsName,
-        spokeKm: mapping.spokeKm,
+        spokeKm: finalSpokeKm,
         spokeDuration: spokeTime,
         hubKm: mapping.hubKm,
         hubDuration: hubTime
       };
     }
 
+    const normOffice = (officeName || '').toLowerCase();
+    const finalSpokeKm = normOffice.includes('cuddalore ho') ? 2 : normOffice.includes('cuddalore do') ? 2.5 : 5;
+
     return {
       bsName: 'CUDDALORE BUS STAND',
-      spokeKm: 5,
+      spokeKm: finalSpokeKm,
       spokeDuration: 15,
       hubKm: 30,
       hubDuration: 60
@@ -2790,14 +2853,9 @@ const App: React.FC = () => {
     const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
     if (cleanOffice === cleanAttached) return 0;
 
-    const matched = officesDb.find(o => {
-      const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const attOff = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const destOff = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
-      return (fOff === attOff && tOff === destOff) || (fOff === destOff && tOff === attOff);
-    });
-    if (matched) {
+    const routeMatch = findOfficeRoute(attachedOffice, officeName);
+    if (routeMatch) {
+      const matched = routeMatch.entry;
       const isBike = mode?.toLowerCase().trim() === 'bike';
       if (!isBike && matched.viaBusStand && matched.viaBusStand.trim()) {
         const specs = getOfficeDynamicSpecs(officeName);
@@ -2808,8 +2866,6 @@ const App: React.FC = () => {
       }
       return isBike ? matched.durationBike : matched.durationBus;
     }
-
-
 
     const nName = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
     const nMode = mode ? mode.toLowerCase().trim() : '';
@@ -2875,19 +2931,11 @@ const App: React.FC = () => {
     const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
     if (cleanOffice === cleanAttached) return 0;
 
-    const matched = officesDb.find(o => {
-      const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const attOff = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const destOff = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
-      return (fOff === attOff && tOff === destOff) || (fOff === destOff && tOff === attOff);
-    });
-    if (matched) {
+    const routeMatch = findOfficeRoute(attachedOffice, officeName);
+    if (routeMatch) {
       const isBike = mode?.toLowerCase().trim() === 'bike';
-      return isBike ? matched.distanceBike : matched.distanceBus;
+      return isBike ? routeMatch.entry.distanceBike : routeMatch.entry.distanceBus;
     }
-
-
 
     const nName = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
     const nMode = mode ? mode.toLowerCase().trim() : '';
@@ -2935,39 +2983,18 @@ const App: React.FC = () => {
     const cleanAttached = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
     if (cleanOffice === cleanAttached) return 0;
 
-    const matched = officesDb.find(o => {
-      const fOff = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const tOff = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const attOff = attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim();
-      const destOff = officeName.toLowerCase().replace(/\s+/g, ' ').trim();
-      return (fOff === attOff && tOff === destOff) || (fOff === destOff && tOff === attOff);
-    });
-    if (matched && matched.fareBus !== undefined) {
-      return matched.fareBus;
+    const routeMatch = findOfficeRoute(attachedOffice, officeName);
+    if (routeMatch && routeMatch.entry.fareBus !== undefined) {
+      return routeMatch.entry.fareBus;
     }
     return undefined;
   };
 
   const getInterOfficeSpec = (fromOff: string, toOff: string, mode?: string) => {
-    const normalizedFrom = fromOff.toLowerCase().replace(/\s+/g, ' ').trim();
-    const normalizedTo = toOff.toLowerCase().replace(/\s+/g, ' ').trim();
-    
-    // First, look for exact match in officesDb
-    let found = officesDb.find(r => 
-      r.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim() === normalizedFrom &&
-      r.toOffice.toLowerCase().replace(/\s+/g, ' ').trim() === normalizedTo
-    );
-    let reverse = false;
-    if (!found) {
-      // Look for reverse match in officesDb
-      found = officesDb.find(r => 
-        r.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim() === normalizedTo &&
-        r.toOffice.toLowerCase().replace(/\s+/g, ' ').trim() === normalizedFrom
-      );
-      if (found) reverse = true;
-    }
-    
-    if (found) {
+    const routeMatch = findOfficeRoute(fromOff, toOff);
+    if (routeMatch) {
+      const found = routeMatch.entry;
+      const reverse = routeMatch.isReverse;
       const isBike = mode?.toLowerCase().trim() === 'bike';
       return {
         km: (isBike ? found.distanceBike : found.distanceBus).toString(),
@@ -3029,23 +3056,49 @@ const App: React.FC = () => {
     for (let idx = 1; idx < updated.length; idx++) {
       const prev = updated[idx - 1];
       const v = updated[idx];
-      if (prev.officeName && v.officeName && !v.isManualTime) {
-        let travelDur = 20;
-        const spec = getInterOfficeSpec(prev.officeName, v.officeName, mode);
-        if (spec) {
-          travelDur = spec.dur || 20;
-        } else {
-          travelDur = getTravelDur(v.officeName, mode);
-        }
-        const newStartTime = addMinutesToTime(prev.endTime, travelDur);
-        if (v.startTime !== newStartTime) {
+      if (prev.officeName && v.officeName) {
+        const vStartMin = timeToMinutes(v.startTime);
+        const prevEndMin = timeToMinutes(prev.endTime);
+        const isStrictOverlap = vStartMin < prevEndMin;
+
+        if (!v.isManualTime || isStrictOverlap) {
+          let travelDur = 20;
+          const spec = getInterOfficeSpec(prev.officeName, v.officeName, mode);
+          if (spec) {
+            travelDur = spec.dur || 20;
+          } else {
+            const normFrom = prev.officeName.toLowerCase().replace(/\s+/g, ' ').trim();
+            const normTo = v.officeName.toLowerCase().replace(/\s+/g, ' ').trim();
+            const matched = officesDb.find(o => {
+              const f = o.fromOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+              const t = o.toOffice.toLowerCase().replace(/\s+/g, ' ').trim();
+              return (f === normFrom && t === normTo) || (f === normTo && t === normFrom);
+            });
+            if (matched) {
+              travelDur = (mode?.toLowerCase().trim() === 'bike') ? (matched.durationBike || 20) : (matched.durationBus || 25);
+            } else {
+              travelDur = (mode?.toLowerCase().trim() === 'bike') ? 20 : 25;
+            }
+          }
+          const newStartTime = addMinutesToTime(prev.endTime, travelDur);
           const prevDuration = Math.max(10, timeToMinutes(v.endTime) - timeToMinutes(v.startTime));
           const newEndTime = addMinutesToTime(newStartTime, prevDuration);
-          updated[idx] = {
-            ...v,
-            startTime: newStartTime,
-            endTime: newEndTime
-          };
+
+          if (!v.isManualTime) {
+            if (v.startTime !== newStartTime || v.endTime !== newEndTime) {
+              updated[idx] = {
+                ...v,
+                startTime: newStartTime,
+                endTime: newEndTime
+              };
+            }
+          } else if (isStrictOverlap) {
+            updated[idx] = {
+              ...v,
+              startTime: newStartTime,
+              endTime: newEndTime
+            };
+          }
         }
       }
     }
@@ -3264,17 +3317,47 @@ const App: React.FC = () => {
 
   const runBikeOptimizer = () => {
     // 1. Get all activities of the current month
-    const currentMonthActs = activities.filter(act => {
+    // Merge active form edits for currently selected day if it belongs to current month
+    const activeDay = availableDays[selectedDateIdx];
+    const activeDateStr = activeDay ? formatDate(activeDay) : '';
+    let mergedMonthActs = activities.filter(act => {
       if (!act || !act.date) return false;
       const parts = act.date.split('.');
       return parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr;
     });
 
-    // 2. Identify candidate days
-    const candidates = currentMonthActs.map(act => {
+    if (activeDay && activeDateStr) {
+      const parts = activeDateStr.split('.');
+      if (parts.length === 3 && parts[1] === currentMonthStr && parts[2] === currentYearStr) {
+        const existingIdx = mergedMonthActs.findIndex(a => a.date === activeDateStr);
+        const dayName = formatDay(activeDay);
+        const activeEntry: ActivityEntry = {
+          id: activeDay.toISOString(),
+          date: activeDateStr,
+          dayName,
+          transportMode,
+          visits: leaveType ? [] : [...visits],
+          leaveType: leaveType || undefined,
+          workedOnHoliday: workedOnHoliday || undefined,
+          details: leaveType === 'CL' ? 'CASUAL LEAVE' : leaveType === 'EL' ? 'EARNED LEAVE' : computeDetails(visits, activeDateStr, dayName, transportMode, workedOnHoliday)
+        };
+        if (existingIdx >= 0) {
+          mergedMonthActs[existingIdx] = activeEntry;
+        } else if (!leaveType && visits.length > 0) {
+          mergedMonthActs.push(activeEntry);
+        }
+      }
+    }
+
+    // 2. Identify candidate tour days (days with office visits)
+    const candidates: CandidateDay[] = mergedMonthActs.map(act => {
       const realVisits = act.visits.filter(v => v.officeName && v.officeName.toLowerCase().replace(/\s+/g, ' ').trim() !== attachedOffice.toLowerCase().replace(/\s+/g, ' ').trim());
       if (realVisits.length === 0) return null;
+      if (act.leaveType === 'CL' || act.leaveType === 'EL') return null;
       
+      const dayObj = availableDays.find(d => formatDate(d) === act.date);
+      if (dayObj && !act.workedOnHoliday && (formatDay(dayObj) === "Sunday" || HOLIDAYS[act.date])) return null;
+
       const bikeMoves = generateMovementsForDay({ ...act, transportMode: 'Bike' });
       const bikeKM = bikeMoves
         .filter(m => {
@@ -3292,24 +3375,26 @@ const App: React.FC = () => {
           return true;
         })
         .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
-        
-      const isFixedBike = act.transportMode === 'Bike';
+
+      const gain = Math.max(0, bikeKM - busKM);
         
       return {
         id: act.id,
         date: act.date,
-        bikeKM,
-        busKM,
-        gain: Math.max(0, bikeKM - busKM),
-        isFixedBike,
+        dayName: act.dayName || (dayObj ? formatDay(dayObj) : ''),
+        officesVisited: realVisits.map(v => cleanOfficeSpelling(v.officeName)).join(' ➔ '),
+        bikeKM: Math.round(bikeKM * 10) / 10,
+        busKM: Math.round(busKM * 10) / 10,
+        gain: Math.round(gain * 10) / 10,
+        currentMode: act.transportMode,
         originalAct: act
       };
-    }).filter(Boolean) as { id: string; date: string; bikeKM: number; busKM: number; gain: number; isFixedBike: boolean; originalAct: any }[];
+    }).filter(Boolean) as CandidateDay[];
 
     if (candidates.length === 0) {
       setConfirmModal({
-        title: "No Candidates Found",
-        message: "We couldn't find any saved days with office visits in the current month to optimize. Please fill and save some days first!",
+        title: "No Candidate Days Found",
+        message: `We couldn't find any saved tour days with office visits in ${new Date(metadata.year, metadata.month).toLocaleString('default', { month: 'long' })} ${metadata.year} to optimize. Please fill and save some days first!`,
         confirmText: "Understood",
         accentColor: "rose",
         onConfirm: () => setConfirmModal(null)
@@ -3317,7 +3402,7 @@ const App: React.FC = () => {
       return;
     }
 
-    // 3. Constant/Baseline Bike KM from movements in other months or non-candidate movements in current month (e.g. manual entries)
+    // 3. Baseline Bike KM from non-candidate movements (e.g. manual entries) in the current month
     const candidateDates = new Set(candidates.map(c => c.date));
     const nonCandidateBikeKM = currentMonthMovements
       .filter(m => {
@@ -3329,121 +3414,110 @@ const App: React.FC = () => {
       })
       .reduce((sum, m) => sum + (parseFloat(m.km) || 0), 0);
 
-    const baselineWithAllBus = nonCandidateBikeKM + candidates.reduce((sum, c) => {
-      if (c.isFixedBike) {
-        return sum + c.bikeKM;
-      } else {
-        return sum + c.busKM;
-      }
-    }, 0);
+    // Baseline bike km if all candidates were set to Bus mode
+    const baselineBusBikeKM = nonCandidateBikeKM + candidates.reduce((sum, c) => sum + c.busKM, 0);
 
-    // Target is 200 - baselineWithAllBus
-    const targetKM = 200 - baselineWithAllBus;
-    
-    if (targetKM <= 0) {
-      setOptimizationResult({
-        candidates,
-        selectedIds: candidates.filter(c => c.isFixedBike).map(c => c.id),
-        totalKM: baselineWithAllBus,
-        baselineWithAllBus,
-        nonCandidateBikeKM,
-        message: activeProfile === "Muthvel R"
-          ? "Your baseline travel (including manually filled bike days, and excluding Neyveli cluster routes) already equals or exceeds the 200 km target! No extra bike days are required."
-          : "Your baseline travel (including manually filled bike days) already equals or exceeds the 200 km target! No extra bike days are required."
-      });
-      return;
-    }
+    const targetKM = 200;
+    const targetGain = targetKM - baselineBusBikeKM;
+    const totalPossibleGain = candidates.reduce((sum, c) => sum + c.gain, 0);
+    const maxPossibleBikeKM = Math.round((baselineBusBikeKM + totalPossibleGain) * 10) / 10;
 
-    // Scale weights by 10
-    const scaledTarget = Math.ceil(targetKM * 10);
-    const scaledCandidates = candidates
-      .filter(c => !c.isFixedBike)
-      .map((c, idx) => ({
-        index: idx,
-        id: c.id,
-        weight: Math.round(c.gain * 10),
-        originalAct: c.originalAct
-      })).filter(sc => sc.weight > 0);
+    let recommendedUnderIds: string[] = [];
+    let recommendedOverIds: string[] = [];
 
-    const totalWeightSum = scaledCandidates.reduce((sum, sc) => sum + sc.weight, 0);
-    
-    if (totalWeightSum < scaledTarget) {
-      const maxPossibleBikeKM = baselineWithAllBus + candidates.filter(c => !c.isFixedBike).reduce((sum, c) => sum + c.gain, 0);
-      setOptimizationResult({
-        candidates,
-        selectedIds: candidates.map(c => c.id),
-        totalKM: maxPossibleBikeKM,
-        baselineWithAllBus,
-        nonCandidateBikeKM,
-        insufficient: true,
-        message: activeProfile === "Muthvel R"
-          ? `Even by setting all candidate days to BIKE mode, the maximum possible distance (excluding Neyveli cluster routes) is ${maxPossibleBikeKM.toFixed(1)} km (which is less than the 200 km target).`
-          : `Even by setting all candidate days to BIKE mode, the maximum possible distance is ${maxPossibleBikeKM.toFixed(1)} km (which is less than the 200 km target).`
-      });
-      return;
-    }
+    if (maxPossibleBikeKM <= targetKM) {
+      // Even if every candidate day is Bike, it doesn't exceed 200 km
+      recommendedUnderIds = candidates.map(c => c.id);
+      recommendedOverIds = candidates.map(c => c.id);
+    } else if (targetGain <= 0) {
+      // Baseline alone is >= 200 km, no bike days needed
+      recommendedUnderIds = [];
+      recommendedOverIds = [];
+    } else {
+      // DP subset sum with 0.1 km scaling
+      const scaledTarget = Math.round(targetGain * 10);
+      const scaledItems = candidates
+        .map((c, idx) => ({
+          idx,
+          id: c.id,
+          weight: Math.round(c.gain * 10)
+        }))
+        .filter(it => it.weight > 0);
 
-    // DP algorithm
-    const maxW = totalWeightSum;
-    const dp = new Array(maxW + 1).fill(false);
-    const parent = new Array(maxW + 1).fill(-1);
-    const choice = new Array(maxW + 1).fill(-1);
-    
-    dp[0] = true;
-    
-    for (let i = 0; i < scaledCandidates.length; i++) {
-      const w = scaledCandidates[i].weight;
-      for (let v = maxW; v >= w; v--) {
-        if (dp[v - w] && !dp[v]) {
-          dp[v] = true;
-          parent[v] = v - w;
-          choice[v] = i;
+      const maxW = scaledItems.reduce((sum, it) => sum + it.weight, 0);
+      const dp = new Array(maxW + 1).fill(false);
+      const parent = new Array(maxW + 1).fill(-1);
+      const choice = new Array(maxW + 1).fill(-1);
+      
+      dp[0] = true;
+      
+      for (let i = 0; i < scaledItems.length; i++) {
+        const w = scaledItems[i].weight;
+        for (let v = maxW; v >= w; v--) {
+          if (dp[v - w] && !dp[v]) {
+            dp[v] = true;
+            parent[v] = v - w;
+            choice[v] = i;
+          }
         }
       }
-    }
-    
-    let bestW = -1;
-    for (let v = scaledTarget; v <= maxW; v++) {
-      if (dp[v]) {
-        bestW = v;
-        break;
-      }
-    }
-    
-    const optimizedIds: string[] = [];
-    if (bestW !== -1) {
-      let curr = bestW;
-      while (curr > 0) {
-        const idx = choice[curr];
-        if (idx !== -1 && idx !== undefined) {
-          optimizedIds.push(scaledCandidates[idx].id);
-          curr = parent[curr];
-        } else {
+
+      const reconstruct = (weight: number): string[] => {
+        if (weight <= 0) return [];
+        const ids: string[] = [];
+        let curr = weight;
+        while (curr > 0) {
+          const itemIdx = choice[curr];
+          if (itemIdx !== undefined && itemIdx >= 0) {
+            ids.push(scaledItems[itemIdx].id);
+            curr = parent[curr];
+          } else {
+            break;
+          }
+        }
+        return ids;
+      };
+
+      // Best under or equal to target
+      let bestUnderW = 0;
+      for (let v = Math.min(scaledTarget, maxW); v >= 0; v--) {
+        if (dp[v]) {
+          bestUnderW = v;
           break;
         }
       }
+      recommendedUnderIds = reconstruct(bestUnderW);
+
+      // Best over or equal to target
+      let bestOverW = -1;
+      for (let v = scaledTarget; v <= maxW; v++) {
+        if (dp[v]) {
+          bestOverW = v;
+          break;
+        }
+      }
+      if (bestOverW !== -1) {
+        recommendedOverIds = reconstruct(bestOverW);
+      } else {
+        recommendedOverIds = candidates.map(c => c.id);
+      }
     }
-
-    const selectedIds = [
-      ...candidates.filter(c => c.isFixedBike).map(c => c.id),
-      ...optimizedIds
-    ];
-
-    const optimalTotalKM = baselineWithAllBus + (bestW / 10);
 
     setOptimizationResult({
       candidates,
-      selectedIds,
-      totalKM: optimalTotalKM,
-      baselineWithAllBus,
+      initialSelectedIds: recommendedUnderIds,
+      recommendedUnderIds,
+      recommendedOverIds,
+      baselineBusBikeKM,
       nonCandidateBikeKM,
-      message: activeProfile === "Muthvel R"
-        ? `We found a configuration with exactly ${optimalTotalKM.toFixed(1)} km (excluding Neyveli cluster routes and preserving manually filled bike days)!`
-        : `We found a configuration with exactly ${optimalTotalKM.toFixed(1)} km (preserving manually filled bike days)!`
+      targetKM: 200,
+      monthName: new Date(metadata.year, metadata.month).toLocaleString('default', { month: 'long' }),
+      year: metadata.year,
+      activeProfile
     });
   };
 
-  const applyBikeOptimization = (selectedIds: string[], candidates: any[]) => {
+  const applyBikeOptimization = (selectedIds: string[], candidates: CandidateDay[]) => {
     // 1. Save backup of current month before applying optimization
     const currentMonthActs = activities.filter(act => {
       if (!act || !act.date) return false;
@@ -3466,14 +3540,15 @@ const App: React.FC = () => {
       timestamp: new Date().toISOString()
     };
 
-    localStorage.setItem(`diary_profile_${activeProfile}_bike_opt_backup`, JSON.stringify(backupData));
+    const backupKey = getProfileStorageKey(activeProfile, 'bike_opt_backup');
+    localStorage.setItem(backupKey, JSON.stringify(backupData));
     setBikeOptBackup(backupData);
 
     const selectedSet = new Set(selectedIds);
     const updatedActsMap = new Map();
     
     candidates.forEach(c => {
-      const targetMode = (c.isFixedBike || selectedSet.has(c.id)) ? 'Bike' : 'Bus';
+      const targetMode: 'Bike' | 'Bus' = selectedSet.has(c.id) ? 'Bike' : 'Bus';
       
       const dParts = c.originalAct.date.split('.');
       const dObj = new Date(parseInt(dParts[2]), parseInt(dParts[1]) - 1, parseInt(dParts[0]));
@@ -3486,15 +3561,18 @@ const App: React.FC = () => {
       });
     });
 
+    let finalActs: ActivityEntry[] = [];
     setActivities(prev => {
-      return prev.map(act => {
+      finalActs = prev.map(act => {
         if (updatedActsMap.has(act.id)) {
           return updatedActsMap.get(act.id);
         }
         return act;
       });
+      return finalActs;
     });
 
+    let finalMoves: MovementEntry[] = [];
     setMovements(prev => {
       const candidateDates = new Set(candidates.map(c => c.date));
       const filteredMovements = prev.filter(m => !candidateDates.has(m.date) || m.isManual);
@@ -3506,18 +3584,42 @@ const App: React.FC = () => {
         newMoves.push(...dayMoves);
       });
 
-      const combined = [...filteredMovements, ...newMoves].sort((a, b) => {
+      finalMoves = [...filteredMovements, ...newMoves].sort((a, b) => {
         const dComp = a.date.split('.').reverse().join('').localeCompare(b.date.split('.').reverse().join(''));
         return dComp !== 0 ? dComp : a.fromTime.localeCompare(b.fromTime);
       });
-      return combined;
+      return finalMoves;
     });
+
+    // Synchronous direct localStorage persistence
+    try {
+      const keyActs = getProfileStorageKey(activeProfile, "activities");
+      localStorage.setItem(keyActs, JSON.stringify(finalActs));
+      const keyMoves = getProfileStorageKey(activeProfile, "movements");
+      localStorage.setItem(keyMoves, JSON.stringify(finalMoves));
+    } catch {
+      // ignore
+    }
+
+    // Also synchronize current active form on screen if it matches one of the candidate days
+    const activeDay = availableDays[selectedDateIdx];
+    if (activeDay) {
+      const activeDateStr = formatDate(activeDay);
+      const matchedCand = candidates.find(c => c.date === activeDateStr);
+      if (matchedCand && updatedActsMap.has(matchedCand.id)) {
+        const updatedAct = updatedActsMap.get(matchedCand.id);
+        setTransportMode(updatedAct.transportMode);
+        if (updatedAct.visits) {
+          setVisits(updatedAct.visits);
+        }
+      }
+    }
 
     setOptimizationResult(null);
 
     setConfirmModal({
-      title: "Optimization Applied! 🚴",
-      message: `Successfully set ${selectedIds.length} days to BIKE mode and ${candidates.length - selectedIds.length} days to BUS mode.\n\nYour total monthly Bike distance is now optimized.`,
+      title: "Optimization Applied & Saved! 🚴",
+      message: `Successfully set and saved ${selectedIds.length} days to BIKE mode and ${candidates.length - selectedIds.length} days to BUS mode.\n\nYour monthly Bike distance is now optimized and stored in your diary.`,
       confirmText: "Super, Got It!",
       accentColor: "emerald",
       onConfirm: () => setConfirmModal(null)
@@ -3525,7 +3627,7 @@ const App: React.FC = () => {
   };
 
   const restorePreOptimizationState = () => {
-    const key = `diary_profile_${activeProfile}_bike_opt_backup`;
+    const key = getProfileStorageKey(activeProfile, 'bike_opt_backup');
     const saved = localStorage.getItem(key);
     
     if (!saved && !bikeOptBackup) {
@@ -3567,6 +3669,17 @@ const App: React.FC = () => {
     setBikeOptBackup(null);
     setOptimizationResult(null);
 
+    // Refresh current form if active day was part of backup
+    const activeDay = availableDays[selectedDateIdx];
+    if (activeDay) {
+      const activeDateStr = formatDate(activeDay);
+      const prevAct = backupActs.find((a: any) => a.date === activeDateStr);
+      if (prevAct) {
+        setTransportMode(prevAct.transportMode || 'Bus');
+        if (prevAct.visits) setVisits(prevAct.visits);
+      }
+    }
+
     setConfirmModal({
       title: "Restored Pre-Optimization State! 🔄",
       message: `Successfully reverted ${backupActs.length} days to their transport modes and movements prior to optimization.`,
@@ -3576,8 +3689,9 @@ const App: React.FC = () => {
     });
   };
 
-  const handleSaveDay = () => {
+  const handleSaveDay = (advanceToNext: boolean = true) => {
     const day = availableDays[selectedDateIdx];
+    if (!day) return;
     const dateStr = formatDate(day);
     const dayName = formatDay(day);
     const newActivity: ActivityEntry = {
@@ -3591,25 +3705,40 @@ const App: React.FC = () => {
       details: leaveType === 'CL' ? 'CASUAL LEAVE' : leaveType === 'EL' ? 'EARNED LEAVE' : computeDetails(visits, dateStr, dayName, transportMode, workedOnHoliday)
     };
     
+    let updatedActivities: ActivityEntry[] = [];
     setActivities(prev => {
       const filtered = prev.filter(a => a.date !== newActivity.date);
-      return [...filtered, newActivity].sort((a, b) => a.id.localeCompare(b.id));
+      updatedActivities = [...filtered, newActivity].sort((a, b) => a.id.localeCompare(b.id));
+      return updatedActivities;
     });
 
     const newMoves = generateMovementsForDay(newActivity);
+    let updatedMovements: MovementEntry[] = [];
     setMovements(prev => {
       const others = prev.filter(m => m.date !== newActivity.date || m.isManual);
-      const combined = [...others, ...newMoves].sort((a, b) => {
+      updatedMovements = [...others, ...newMoves].sort((a, b) => {
         const dComp = a.date.split('.').reverse().join('').localeCompare(b.date.split('.').reverse().join(''));
         return dComp !== 0 ? dComp : a.fromTime.localeCompare(b.fromTime);
       });
-      return combined;
+      return updatedMovements;
     });
 
-    if (selectedDateIdx < availableDays.length - 1) {
-      setSelectedDateIdx(selectedDateIdx + 1);
+    try {
+      const keyActs = getProfileStorageKey(activeProfile, "activities");
+      localStorage.setItem(keyActs, JSON.stringify(updatedActivities));
+      const keyMoves = getProfileStorageKey(activeProfile, "movements");
+      localStorage.setItem(keyMoves, JSON.stringify(updatedMovements));
+    } catch {
+      // ignore
     }
-    setVisits([{ id: Math.random().toString(36).substr(2, 5), officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }]);
+
+    if (advanceToNext && selectedDateIdx < availableDays.length - 1) {
+      setSelectedDateIdx(selectedDateIdx + 1);
+      setVisits([{ id: Math.random().toString(36).substr(2, 5), officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }]);
+    } else {
+      setSaveSuccessFeedback(true);
+      setTimeout(() => setSaveSuccessFeedback(false), 2500);
+    }
   };
 
   const deleteSavedDay = (date: string) => {
@@ -3667,7 +3796,7 @@ const App: React.FC = () => {
     checkPadding();
   };
 
-  const handleExportTA = (exportMonth: number, exportYear: number) => {
+  const handleExportTA = (exportMonth: number, exportYear: number, format: 'excel' | 'word' = 'excel') => {
     const firstFort = getFortnightDays(exportYear, exportMonth, 'first');
     const secondFort = getFortnightDays(exportYear, exportMonth, 'second');
     const fullMonthDays = [...firstFort, ...secondFort];
@@ -3703,16 +3832,16 @@ const App: React.FC = () => {
                 details: computeDetails([{ id: 'pad', officeName: attachedOffice, startTime: '09:00', endTime: '17:00', issues: '', resolution: '' }], dStr, dNm, 'Bus')
               };
             });
-            generateTACalculationsDoc(tempMetadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements, serviceCalls, attachedOffice, officesDb);
+            generateTACalculationsDoc(tempMetadata, [...monthActivities, ...paddingActivities].sort((a,b) => a.id.localeCompare(b.id)), monthMovements, serviceCalls, attachedOffice, officesDb, format);
             setConfirmModal(null);
           },
           onCancel: () => {
-            generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls, attachedOffice, officesDb);
+            generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls, attachedOffice, officesDb, format);
             setConfirmModal(null);
           }
         });
       } else {
-        generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls, attachedOffice, officesDb);
+        generateTACalculationsDoc(tempMetadata, monthActivities, monthMovements, serviceCalls, attachedOffice, officesDb, format);
       }
     };
 
@@ -3725,244 +3854,63 @@ const App: React.FC = () => {
     setShowTABillModal(true);
   };
 
-  const handleWebSyncSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!loginEmail.trim() || !loginPasscode.trim()) {
-      alert("Please enter a valid Username/Email and Passcode.");
-      return;
-    }
-    setWebSyncStatus('loading');
-    setWebSyncErrorMessage('');
+  const exportAllDataAsJSON = () => {
     try {
-      const response = await fetchWithRetry('/api/web-storage/register-or-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: loginEmail,
-          passcode: loginPasscode,
-          device: getDeviceType()
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Failure logging in.' }));
-        throw new Error(errorData.message || 'Verification failed. Incorrect passcode or invalid format.');
-      }
-
-      const resData = await response.json();
-      if (resData.success) {
-        const loggedInUser = { email: loginEmail.toLowerCase().trim(), passcode: loginPasscode.trim() };
-        localStorage.setItem('diary_websync_user', JSON.stringify(loggedInUser));
-        setWebSyncUser(loggedInUser);
-
-        if (resData.history) {
-          setWebSyncBackups(resData.history);
-        }
-
-        if (resData.updatedAt) {
-          localStorage.setItem('diary_websync_updated_at', resData.updatedAt.toString());
-          setWebSyncUpdatedAt(resData.updatedAt);
-        }
-
-        if (resData.payload) {
-          setActiveCloudPayload(resData.payload);
-          // Overwrite with downloaded workspace values!
-          Object.entries(resData.payload).forEach(([key, val]) => {
-            if (typeof val === 'string') {
-              localStorage.setItem(key, val);
-            }
-          });
-          setWebSyncStatus('synced');
-          setConfirmModal({
-            title: "Database Sync Connected! ☁️",
-            message: `Successfully connected as "${loggedInUser.email}". Your cloud-saved database, day entries, and transit relationships have been retrieved and synchronized over to this device!`,
-            confirmText: "Phenomenal!",
-            accentColor: "emerald",
-            onConfirm: () => {
-              setConfirmModal(null);
-              setLoginModalOpen(false);
-              sessionStorage.setItem('diary_sync_reloaded', '1');
-              window.location.reload();
-            }
-          });
-        } else {
-          // Brand new account: sync current local data instantly to establish their initial cloud space
-          await syncWorkspaceToWebStorage(loggedInUser);
-          setWebSyncStatus('synced');
-          setIsInitialSyncCompleted(true);
-          setConfirmModal({
-            title: "Cloud Workspace Established! 🚀",
-            message: `Success! Created a brand new cloud workspace for "${loggedInUser.email}". Your current local database is now synced automatically. Any updates from mobile or PC will reflect in real-time.`,
-            confirmText: "Excellent, Thanks!",
-            accentColor: "emerald",
-            onConfirm: () => {
-              setConfirmModal(null);
-              setLoginModalOpen(false);
-            }
-          });
+      const fullStorage: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('diary_')) {
+          fullStorage[key] = localStorage.getItem(key) || '';
         }
       }
-    } catch (err: any) {
-      console.error(err);
-      setWebSyncStatus('error');
-      setWebSyncErrorMessage(err.message || 'Validation error.');
-    }
-  };
-
-  const handleWebSyncLogout = () => {
-    setConfirmModal({
-      title: "Disconnect Web Sync? ☁️",
-      message: `Are you sure you want to log out from "${webSyncUser?.email}"? This device will stop syncing automatically to the cloud, but all current local data will remain fully intact.`,
-      confirmText: "Yes, Disconnect",
-      cancelText: "No, Stay Connected",
-      accentColor: "rose",
-      onConfirm: () => {
-        localStorage.removeItem('diary_websync_user');
-        localStorage.removeItem('diary_websync_updated_at');
-        setWebSyncUser(null);
-        setWebSyncStatus('idle');
-        setWebSyncBackups([]);
-        setWebSyncUpdatedAt(null);
-        setActiveCloudPayload(null);
-        setConfirmModal({
-          title: "Disconnected",
-          message: "Web Sync disconnected. This device is now in Offline Local Storage mode.",
-          confirmText: "Okay",
-          accentColor: "blue",
-          onConfirm: () => {
-            setConfirmModal(null);
-            setLoginModalOpen(false);
-          }
-        });
-      },
-      onCancel: () => setConfirmModal(null)
-    });
-  };
-
-  const handleRestoreFromHistory = (backup: { payload: any; updatedAt: number }) => {
-    setConfirmModal({
-      title: "Rollback Workspace? ⚠️",
-      message: `Are you sure you want to restore the backup from ${new Date(backup.updatedAt).toLocaleString()}? This will replace your current local entries with this historical version.`,
-      confirmText: "Yes, Rollback",
-      cancelText: "No, Cancel",
-      accentColor: "rose",
-      onConfirm: () => {
-        // Overwrite local storage
-        Object.entries(backup.payload).forEach(([key, val]) => {
-          if (typeof val === 'string') {
-            localStorage.setItem(key, val);
-          }
-        });
-        
-        // Also ensure active profile and states are reloaded
-        sessionStorage.setItem('diary_sync_reloaded', '1');
-        window.location.reload();
-      },
-      onCancel: () => setConfirmModal(null)
-    });
-  };
-
-  const resolveSyncConflictWithDownload = (cloudPayload: any, cloudUpdatedAt: number) => {
-    Object.entries(cloudPayload).forEach(([key, val]) => {
-      if (typeof val === 'string') {
-        localStorage.setItem(key, val);
-      }
-    });
-    localStorage.setItem('diary_websync_updated_at', cloudUpdatedAt.toString());
-    setWebSyncUpdatedAt(cloudUpdatedAt);
-    setActiveCloudPayload(cloudPayload);
-    setSyncConflict(null);
-    setWebSyncStatus('synced');
-    sessionStorage.setItem('diary_sync_reloaded', '1');
-    window.location.reload();
-  };
-
-  const resolveSyncConflictWithForceOverwrite = async () => {
-    if (!webSyncUser) return;
-    setSyncConflict(null);
-    await syncWorkspaceToWebStorage(undefined, getLocalStorageSyncPayload(), true);
-  };
-
-  const handleCloudUpload = async () => {
-    setIsUploading(true);
-    try {
+      
       const payload = {
         version: "2.0",
-        fullStorage: getLocalStorageSyncPayload(),
+        exportDate: new Date().toISOString(),
+        activeProfile,
+        profiles,
         metadata,
         activities,
         movements,
         officesDb,
-        attachedOffice
+        attachedOffice,
+        serviceCalls,
+        fullStorage
       };
-      
-      const response = await fetchWithRetry('/api/cloud-sync/upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Upload failed. Internal status: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      if (result.success && result.pin) {
-        setActiveCloudPin(result.pin);
-        setConfirmModal({
-          title: "Uploaded to Cloud! ☁️",
-          message: `Your entire multi-profile workspace data (including all diaries, transits, service calls, and custom databases) is now securely saved in our cloud cache.\n\nYour 6-Digit Sync PIN is:\n\n${result.pin.slice(0,3)} ${result.pin.slice(3)}\n\nEnter this PIN on your other device to download & restore instantly! (Active for 48 hours)`,
-          confirmText: "Super, Got It!",
-          accentColor: "emerald",
-          onConfirm: () => setConfirmModal(null)
-        });
-      } else {
-        throw new Error(result.message || "Unknown error during cloud upload.");
-      }
+      const jsonStr = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `SADairy_Backup_${metadata.name ? metadata.name.replace(/\s+/g, '_') : 'Workspace'}_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } catch (e: any) {
-      setConfirmModal({
-        title: "Cloud Upload Failed",
-        message: `Could not sync data to the server: ${e?.message || e}. Please make sure you are connected to the internet and try again.`,
-        confirmText: "Close",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } finally {
-      setIsUploading(false);
+      alert("Error downloading backup: " + e.message);
     }
   };
 
-  const handleCloudDownload = async (pinSource?: string) => {
-    const pin = (pinSource || syncPinInput).trim().replace(/\s+/g, '');
-    if (!pin) {
-      setConfirmModal({
-        title: "Enter a Valid PIN",
-        message: "Please enter the 6-digit PIN generated from your computer/other device to download your backup.",
-        confirmText: "Retry",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-      return;
-    }
+  const handleFileUploadSync = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     
-    setIsDownloading(true);
-    try {
-      const response = await fetchWithRetry(`/api/cloud-sync/download/${pin}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "PIN not found or has expired." }));
-        throw new Error(errorData.message || "PIN code does not exist.");
-      }
-      
-      const result = await response.json();
-      if (result.success && result.data) {
-        const parsed = result.data;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const parsed = JSON.parse(text);
+        
+        if (!parsed.activities && !parsed.metadata && !parsed.fullStorage) {
+          throw new Error("Invalid backup file format.");
+        }
+        
         setConfirmModal({
-          title: "Cloud Sync Data Found! ☁️",
-          message: `We found a valid backup containing all your active diaries, transits, service calls, and configured profiles. This will restore and sync everything. Do you want to load this data and overwrite current browser entries?`,
-          confirmText: "Yes, Synchronize",
-          cancelText: "No, Cancel",
+          title: "Restore from Backup File 📂",
+          message: `Are you sure you want to restore the backup file "${file.name}"? This will update your local workspace with the saved data.`,
+          confirmText: "Yes, Restore Backup",
+          cancelText: "Cancel",
           accentColor: "blue",
           onConfirm: () => {
             if (parsed.fullStorage) {
@@ -3971,7 +3919,7 @@ const App: React.FC = () => {
                 localStorage.setItem(key, storage[key]);
               });
               
-              const activeProf = localStorage.getItem('diary_active_profile') || "Default Profile";
+              const activeProf = localStorage.getItem('diary_active_profile') || parsed.activeProfile || "Default Profile";
               const prefix = isSystemDefaultProfile(activeProf) ? "diary_" : `diary_profile_${activeProf}_`;
               
               const savedProfiles = localStorage.getItem('diary_profiles_list');
@@ -4003,9 +3951,7 @@ const App: React.FC = () => {
               
               const scrDef = localStorage.getItem(`${prefix}scr_defaults`);
               if (scrDef) setScrDefaults(JSON.parse(scrDef));
-              
             } else {
-              // Backward compatibility for 1.0 single profile payload
               if (parsed.metadata) setMetadata(parsed.metadata);
               if (parsed.activities) setActivities(parsed.activities);
               if (parsed.movements) setMovements(parsed.movements);
@@ -4013,183 +3959,15 @@ const App: React.FC = () => {
               if (parsed.interOfficeDb) {
                 finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
               }
-              if (finalOffices.length > 0) setOfficesDb(finalOffices);
+              if (finalOffices.length > 0) setOfficesDb(migrateOfficesDb(finalOffices));
               if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
+              if (parsed.serviceCalls) setServiceCalls(parsed.serviceCalls);
             }
-            
-            setSyncPinInput('');
-            setConfirmModal({
-              title: "Cloud Sync Complete!",
-              message: "Fantastic! Successfully synchronized all profiles, diaries, and settings over to this device.",
-              confirmText: "Great!",
-              accentColor: "emerald",
-              onConfirm: () => setConfirmModal(null)
-            });
-          },
-          onCancel: () => {
-            setConfirmModal(null);
-          }
-        });
-      } else {
-        throw new Error("Invalid sync file format from server.");
-      }
-    } catch (e: any) {
-      setConfirmModal({
-        title: "Download Rejected",
-        message: `Failed to download: ${e?.message || e}. Double-check your PIN and ensure it is correct and not expired.`,
-        confirmText: "Retry",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const generateQuickSyncKey = () => {
-    try {
-      const payload = {
-        version: "1.0",
-        metadata,
-        activities,
-        movements,
-        officesDb,
-        attachedOffice
-      };
-      const jsonStr = JSON.stringify(payload);
-      const base64 = btoa(unescape(encodeURIComponent(jsonStr)));
-      navigator.clipboard.writeText(base64);
-      setCopiedKey(true);
-      setTimeout(() => setCopiedKey(false), 3000);
-      setConfirmModal({
-        title: "Sync Key Copied",
-        message: "Your complete workspace data (June entries, configuration & route matrix) has been successfully copied as a text token! You can now send this token to your mobile phone (by email, WhatsApp or notes) and paste it into the sync section there.",
-        confirmText: "Awesome!",
-        accentColor: "emerald",
-        onConfirm: () => setConfirmModal(null)
-      });
-    } catch (e: any) {
-      setConfirmModal({
-        title: "Error Creating Sync Key",
-        message: "Failed to compile your workspace data. " + e.message,
-        confirmText: "Close",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-    }
-  };
-
-  const importQuickSyncKey = () => {
-    if (!syncTextInput.trim()) return;
-    try {
-      const decodedJson = decodeURIComponent(escape(atob(syncTextInput.trim())));
-      const parsed = JSON.parse(decodedJson);
-      
-      if (!parsed.activities && !parsed.metadata) {
-        throw new Error("Invalid sync key payload.");
-      }
-      
-      setConfirmModal({
-        title: "Restore from Sync Key",
-        message: `This will import the data from your computer. This contains ${parsed.activities?.length || 0} activity entries (including June 1-8 entries) and profiles. Do you want to overwrite your mobile current local state and proceed?`,
-        confirmText: "Yes, Restore all Data",
-        cancelText: "Cancel",
-        accentColor: "blue",
-        onConfirm: () => {
-          if (parsed.metadata) setMetadata(parsed.metadata);
-          if (parsed.activities) setActivities(parsed.activities);
-          if (parsed.movements) setMovements(parsed.movements);
-          let finalOffices = parsed.officesDb || [];
-          if (parsed.interOfficeDb) {
-            finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
-          }
-          if (finalOffices.length > 0) setOfficesDb(finalOffices);
-          if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
-          
-          setSyncTextInput('');
-          setConfirmModal({
-            title: "Data Synced Successfully!",
-            message: `Successfully loaded all ${parsed.activities?.length || 0} daily entries, movements and configuration. Your workspace is now 100% updated on this device!`,
-            confirmText: "Great!",
-            accentColor: "emerald",
-            onConfirm: () => setConfirmModal(null)
-          });
-        },
-        onCancel: () => {
-          setConfirmModal(null);
-        }
-      });
-    } catch (e: any) {
-      setConfirmModal({
-        title: "Invalid Sync Key",
-        message: "The entered text is not a valid synchronization key. Please make sure you copied the entire key from your computer/other device and try again.",
-        confirmText: "Retry",
-        accentColor: "rose",
-        onConfirm: () => setConfirmModal(null)
-      });
-    }
-  };
-
-  const exportAllDataAsJSON = () => {
-    try {
-      const payload = {
-        version: "1.0",
-        metadata,
-        activities,
-        movements,
-        officesDb,
-        attachedOffice
-      };
-      const jsonStr = JSON.stringify(payload, null, 2);
-      const blob = new Blob([jsonStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `SADairy_SyncBackup_${metadata.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert("Error downloading backup: " + e.message);
-    }
-  };
-
-  const handleFileUploadSync = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string;
-        const parsed = JSON.parse(text);
-        
-        if (!parsed.activities && !parsed.metadata) {
-          throw new Error("Invalid sync file format.");
-        }
-        
-        setConfirmModal({
-          title: "Restore from Backup File",
-          message: `Are you sure you want to restore the backup file containing ${parsed.activities?.length || 0} entries and settings? This will overwrite your existing local data on this browser.`,
-          confirmText: "Yes, Restore Backup",
-          cancelText: "Cancel",
-          accentColor: "blue",
-          onConfirm: () => {
-            if (parsed.metadata) setMetadata(parsed.metadata);
-            if (parsed.activities) setActivities(parsed.activities);
-            if (parsed.movements) setMovements(parsed.movements);
-            let finalOffices = parsed.officesDb || [];
-            if (parsed.interOfficeDb) {
-              finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
-            }
-            if (finalOffices.length > 0) setOfficesDb(finalOffices);
-            if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
             
             e.target.value = '';
             setConfirmModal({
-              title: "Restore Complete!",
-              message: `Successfully restored ${parsed.activities?.length || 0} diary entries, movements and configured matrix.`,
+              title: "Restore Complete! ✅",
+              message: "Successfully restored your local workspace entries, movements, and office configuration.",
               confirmText: "Done",
               accentColor: "emerald",
               onConfirm: () => setConfirmModal(null)
@@ -4203,7 +3981,7 @@ const App: React.FC = () => {
       } catch (err: any) {
         setConfirmModal({
           title: "Failed to Parse Backup",
-          message: "The uploaded file is not a valid SA Dairy JSON sync backup. Please choose a valid file.",
+          message: "The selected file is not a valid SA Diary JSON backup file. Please select a valid JSON backup.",
           confirmText: "Close",
           accentColor: "rose",
           onConfirm: () => setConfirmModal(null)
@@ -4214,134 +3992,228 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
-
-  const ensureDriveAuth = async (): Promise<string | null> => {
-    const existingToken = localStorage.getItem('google_access_token');
-    const existingExpiry = localStorage.getItem('google_access_token_expires_at');
-    if (existingToken && existingExpiry && parseInt(existingExpiry, 10) > Date.now()) {
-      return existingToken;
-    }
+  const handleApplyQRTransferData = (parsed: any, mode: 'overwrite' | 'merge' = 'overwrite') => {
+    if (!parsed) return;
 
     try {
-      const res = await googleSignIn();
-      return res ? res.accessToken : null;
-    } catch (e: any) {
-      console.error("Drive login failed:", e);
-      alert("Google Sign-In failed. Please authorize to access your Google Drive.");
-      return null;
-    }
-  };
+      if (parsed.fullStorage) {
+        const storage = parsed.fullStorage;
+        if (mode === 'overwrite') {
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('diary_')) {
+              keysToRemove.push(k);
+            }
+          }
+          keysToRemove.forEach(k => localStorage.removeItem(k));
+        }
 
-  const backupToGoogleDrive = async () => {
-    setIsDriveBackingUp(true);
-    try {
-      const token = await ensureDriveAuth();
-      if (!token) return;
+        // Apply all storage keys from payload
+        Object.keys(storage).forEach(key => {
+          localStorage.setItem(key, storage[key]);
+        });
 
-      const payload = {
-        version: "1.0",
-        metadata,
-        activities,
-        movements,
-        officesDb,
-        attachedOffice
-      };
-      const jsonStr = JSON.stringify(payload, null, 2);
-      const blob = new Blob([jsonStr], { type: "application/json" });
-      const fileName = `SADairy_Backup_${metadata.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+        const activeProf = localStorage.getItem('diary_active_profile') || parsed.activeProfile || "Default Profile";
+        const prefix = isSystemDefaultProfile(activeProf) ? "diary_" : `diary_profile_${activeProf}_`;
 
-      const folderId = await getOrCreateFolder(token, "SA Dairy");
-      await uploadFileToGoogleDrive(token, fileName, "application/json", blob, folderId);
+        const savedProfiles = localStorage.getItem('diary_profiles_list');
+        if (savedProfiles) setProfiles(JSON.parse(savedProfiles));
+
+        setActiveProfile(activeProf);
+        loadedProfileRef.current = activeProf;
+
+        const metaVal = localStorage.getItem(`${prefix}metadata`);
+        if (metaVal) setMetadata(JSON.parse(metaVal));
+
+        const actVal = localStorage.getItem(`${prefix}activities`);
+        if (actVal) setActivities(JSON.parse(actVal));
+
+        const movVal = localStorage.getItem(`${prefix}movements`);
+        if (movVal) setMovements(JSON.parse(movVal));
+
+        const attOffice = localStorage.getItem(`${prefix}attached_office`);
+        if (attOffice) setAttachedOffice(attOffice);
+
+        const offDb = localStorage.getItem(`${prefix}offices_db`);
+        if (offDb) setOfficesDb(JSON.parse(offDb));
+
+        const servCalls = localStorage.getItem(`${prefix}service_calls`);
+        if (servCalls) setServiceCalls(JSON.parse(servCalls));
+
+        const confScr = localStorage.getItem(`${prefix}confirmed_scr_days`);
+        if (confScr) setConfirmedScrDays(JSON.parse(confScr));
+
+        const scrDef = localStorage.getItem(`${prefix}scr_defaults`);
+        if (scrDef) setScrDefaults(JSON.parse(scrDef));
+      } else {
+        if (parsed.metadata) setMetadata(parsed.metadata);
+        if (parsed.activities) setActivities(parsed.activities);
+        if (parsed.movements) setMovements(parsed.movements);
+        let finalOffices = parsed.officesDb || [];
+        if (parsed.interOfficeDb) {
+          finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
+        }
+        if (finalOffices.length > 0) setOfficesDb(migrateOfficesDb(finalOffices));
+        if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
+        if (parsed.serviceCalls) setServiceCalls(parsed.serviceCalls);
+      }
 
       setConfirmModal({
-        title: "Backup Complete!",
-        message: `Successfully backed up your work to Google Drive as "${fileName}" inside the "SA Dairy" folder!`,
-        confirmText: "Great",
+        title: "Sync Successful! 🚀",
+        message: "Your workspace has been successfully synced and updated with all transferred data.",
+        confirmText: "Great, Continue",
         accentColor: "emerald",
         onConfirm: () => setConfirmModal(null)
       });
     } catch (e: any) {
-      console.error("Error backing up to Google Drive:", e);
-      alert("Error backing up to Google Drive: " + e.message);
-    } finally {
-      setIsDriveBackingUp(false);
-    }
-  };
-
-  const restoreFromGoogleDrive = async () => {
-    setIsDriveRestoring(true);
-    try {
-      const token = await ensureDriveAuth();
-      if (!token) return;
-
-      const folderId = await getOrCreateFolder(token, "SA Dairy");
-      const files = await listBackupFiles(token, folderId);
-
-      if (files.length === 0) {
-        setConfirmModal({
-          title: "No Backups Found",
-          message: "We couldn't find any JSON backups in your Google Drive 'SA Dairy' folder. Make sure you've backed up first!",
-          confirmText: "Close",
-          accentColor: "rose",
-          onConfirm: () => setConfirmModal(null)
-        });
-        return;
-      }
-
-      setDriveBackups(files);
-    } catch (e: any) {
-      console.error("Error fetching backups from Google Drive:", e);
-      alert("Error listing backups: " + e.message);
-    } finally {
-      setIsDriveRestoring(false);
-    }
-  };
-
-  const handleApplyDriveBackup = async (fileId: string, fileName: string) => {
-    try {
-      const token = await ensureDriveAuth();
-      if (!token) return;
-
-      const content = await downloadFileContent(token, fileId);
-      const parsed = JSON.parse(content);
-
-      if (!parsed.activities && !parsed.metadata) {
-        throw new Error("Invalid sync file format.");
-      }
-
+      console.error("Error applying QR transfer payload", e);
       setConfirmModal({
-        title: "Restore from Google Drive",
-        message: `Are you sure you want to restore the backup file "${fileName}" containing ${parsed.activities?.length || 0} entries? This will overwrite your existing local data on this browser.`,
-        confirmText: "Yes, Restore Backup",
-        cancelText: "Cancel",
-        accentColor: "blue",
-        onConfirm: () => {
-          if (parsed.metadata) setMetadata(parsed.metadata);
-          if (parsed.activities) setActivities(parsed.activities);
-          if (parsed.movements) setMovements(parsed.movements);
-          let finalOffices = parsed.officesDb || [];
-          if (parsed.interOfficeDb) {
-            finalOffices = mergeInterOfficeIntoOffices(finalOffices, parsed.interOfficeDb);
-          }
-          if (finalOffices.length > 0) setOfficesDb(finalOffices);
-          if (parsed.attachedOffice) setAttachedOffice(parsed.attachedOffice);
-
-          setDriveBackups(null);
-          setConfirmModal({
-            title: "Restore Complete!",
-            message: `Successfully restored ${parsed.activities?.length || 0} diary entries, movements and configured matrix from Google Drive.`,
-            confirmText: "Done",
-            accentColor: "emerald",
-            onConfirm: () => setConfirmModal(null)
-          });
-        },
-        onCancel: () => {}
+        title: "Sync Error",
+        message: "Failed to apply the received data payload. Please try again.",
+        confirmText: "Close",
+        accentColor: "rose",
+        onConfirm: () => setConfirmModal(null)
       });
-    } catch (e: any) {
-      console.error("Error applying backup from Drive:", e);
-      alert("Error applying backup: " + e.message);
     }
   };
+
+  // Direct 1-Click Cloud Sync (Mobile <-> PC)
+  const handleUploadToCloud = async (silent: boolean = false) => {
+    setIsCloudSyncing(true);
+    try {
+      const fullStorage: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('diary_')) {
+          fullStorage[k] = localStorage.getItem(k) || '';
+        }
+      }
+
+      const payload = {
+        type: 'sa_diary_cross_device_sync',
+        timestamp: Date.now(),
+        device: detectedDevice,
+        activeProfile,
+        metadata,
+        fullStorage
+      };
+
+      const res = await fetch('/api/sync/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload, device: detectedDevice })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const now = data.updatedAt || Date.now();
+        setLastLocalSyncTime(now);
+        localStorage.setItem('diary_last_cloud_sync_time', String(now));
+        setHasNewCloudData(false);
+        setCloudSyncStatus({
+          hasData: true,
+          updatedAt: now,
+          device: detectedDevice,
+          profileName: activeProfile
+        });
+        if (!silent) {
+          setSyncToast({
+            type: 'success',
+            message: `Uploaded from ${detectedDevice}! ☁️`,
+            sub: `Your data is backed up. Ready to download on your ${detectedDevice === 'Mobile' ? 'PC' : 'Mobile'} anytime.`
+          });
+          setTimeout(() => setSyncToast(null), 5000);
+        }
+      } else {
+        throw new Error(data.message || 'Upload failed');
+      }
+    } catch (err: any) {
+      console.error('Cloud upload error:', err);
+      if (!silent) {
+        setSyncToast({
+          type: 'error',
+          message: 'Upload to Cloud Failed',
+          sub: err.message || 'Please check your connection and retry.'
+        });
+        setTimeout(() => setSyncToast(null), 6000);
+      }
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleDownloadFromCloud = async (silent: boolean = false) => {
+    setIsCloudSyncing(true);
+    try {
+      const res = await fetch('/api/sync/pull');
+      const data = await res.json();
+
+      if (data.success && data.payload) {
+        handleApplyQRTransferData(data.payload, 'overwrite');
+        const now = data.updatedAt || Date.now();
+        setLastLocalSyncTime(now);
+        localStorage.setItem('diary_last_cloud_sync_time', String(now));
+        setHasNewCloudData(false);
+        setCloudSyncStatus({
+          hasData: true,
+          updatedAt: now,
+          device: data.device,
+          profileName: data.profileName
+        });
+        if (!silent) {
+          setSyncToast({
+            type: 'success',
+            message: `Synced with ${data.device || 'other device'}! 🚀`,
+            sub: 'All work diaries, travel logs, and database entries have been refreshed.'
+          });
+          setTimeout(() => setSyncToast(null), 5000);
+        }
+      } else {
+        throw new Error(data.message || 'No cloud data found to download');
+      }
+    } catch (err: any) {
+      console.error('Cloud download error:', err);
+      if (!silent) {
+        setSyncToast({
+          type: 'error',
+          message: 'Download from Cloud Failed',
+          sub: err.message || 'No cloud sync record found. Please upload from your other device first.'
+        });
+        setTimeout(() => setSyncToast(null), 6000);
+      }
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const checkCloudSyncStatus = useCallback(async () => {
+    if (operatingMode === 'offline') return;
+    try {
+      const res = await fetch('/api/sync/status');
+      const data = await res.json();
+      if (data.success && data.hasData) {
+        setCloudSyncStatus(data);
+        if (data.updatedAt > (lastLocalSyncTime + 3000) && data.device !== detectedDevice) {
+          setHasNewCloudData(true);
+        }
+      }
+    } catch (e) {
+      // Background status check error ignored
+    }
+  }, [operatingMode, lastLocalSyncTime, detectedDevice]);
+
+  useEffect(() => {
+    if (operatingMode === 'offline') return;
+    checkCloudSyncStatus();
+    const interval = setInterval(checkCloudSyncStatus, 20000);
+    const onFocus = () => checkCloudSyncStatus();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [operatingMode, checkCloudSyncStatus]);
 
   const entryActiveDay = availableDays[selectedDateIdx];
   const entryIsSundayOrHoliday = entryActiveDay ? !!(HOLIDAYS[formatDate(entryActiveDay)] || formatDay(entryActiveDay) === 'Sunday') : false;
@@ -4349,6 +4221,33 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20 font-inter text-slate-900">
+      {/* Toast Notification Alert */}
+      {syncToast && (
+        <div className={`fixed top-4 right-4 z-50 max-w-sm p-4 rounded-2xl shadow-2xl border backdrop-blur-md transition-all flex items-start gap-3 animate-fade-in ${
+          syncToast.type === 'success' 
+            ? 'bg-slate-900/95 text-white border-emerald-500/60' 
+            : 'bg-rose-950/95 text-white border-rose-500/60'
+        }`}>
+          {syncToast.type === 'success' ? (
+            <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 shrink-0">
+              <CheckCircle2 size={18} />
+            </div>
+          ) : (
+            <div className="p-1.5 rounded-xl bg-rose-500/20 text-rose-400 shrink-0">
+              <AlertCircle size={18} />
+            </div>
+          )}
+          <div className="space-y-0.5 flex-1 text-left">
+            <p className="text-xs font-black tracking-wide">{syncToast.message}</p>
+            {syncToast.sub && <p className="text-[11px] text-slate-300 font-medium leading-tight">{syncToast.sub}</p>}
+          </div>
+          <button onClick={() => setSyncToast(null)} className="text-slate-400 hover:text-white cursor-pointer border-0 bg-transparent p-1">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+
       <header className="bg-white border-b border-slate-200 relative z-10 shadow-sm">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 sm:h-20 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 sm:gap-4">
@@ -4359,22 +4258,57 @@ const App: React.FC = () => {
               referrerPolicy="no-referrer" 
             />
             <div>
-              <h1 className="text-lg sm:text-2xl font-black text-slate-800 tracking-tight leading-none">SA Diary</h1>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-lg sm:text-2xl font-black text-slate-800 tracking-tight leading-none">SA Diary</h1>
+                {/* Single Online vs Offline Selector at the top */}
+                <ModeSelector 
+                  mode={operatingMode} 
+                  onChange={handleSetOperatingMode} 
+                  size="sm"
+                />
+              </div>
               <span className="text-[9px] sm:text-[10px] text-indigo-600 font-extrabold uppercase tracking-wider block mt-1">
-                System & Network Admin
+                System &amp; Network Admin
               </span>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-center sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
-            <button 
-              id="cloud-sync-modal-btn"
-              onClick={() => setShowCloudSyncModal(true)} 
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap"
-              title="Upload or download your workspace between PC and mobile using a 6-digit PIN"
-            >
-              <Cloud size={14} className="sm:w-[18px] sm:h-[18px]" /> 
-              <span>Cloud Sync (PC ↔ Mobile)</span>
-            </button>
+            {/* 6-Digit PIN Sync & QR Transfer Hub */}
+            <div className="flex items-center bg-slate-950 text-white p-1 rounded-2xl shadow-xl border border-slate-800">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 text-slate-300 text-[11px] font-bold border-r border-slate-800">
+                <KeyRound size={14} className="text-emerald-400" />
+                <span className="hidden md:inline font-extrabold text-slate-200">PIN Sync</span>
+                <span className="text-[10px] bg-slate-800 text-emerald-300 px-1.5 py-0.5 rounded font-black">
+                  {detectedDevice}
+                </span>
+              </div>
+
+              <button 
+                id="pin-upload-btn"
+                onClick={() => {
+                  setPinSyncInitialMode('upload');
+                  setShowPinSyncModal(true);
+                }}
+                className="flex items-center justify-center gap-1.5 hover:bg-emerald-500 text-white hover:text-slate-950 bg-emerald-600 px-3 py-1.5 sm:py-2 rounded-xl font-black transition-all active:scale-95 text-[11px] sm:text-xs cursor-pointer whitespace-nowrap border-0"
+                title="Upload data and generate a 6-digit PIN"
+              >
+                <Upload size={13} />
+                <span>Upload</span>
+              </button>
+
+              <button 
+                id="pin-download-btn"
+                onClick={() => {
+                  setPinSyncInitialMode('download');
+                  setShowPinSyncModal(true);
+                }}
+                className="flex items-center justify-center gap-1.5 hover:bg-indigo-500 text-white bg-indigo-600 ml-1 px-3 py-1.5 sm:py-2 rounded-xl font-black transition-all active:scale-95 text-[11px] sm:text-xs cursor-pointer whitespace-nowrap border-0"
+                title="Enter 6-digit PIN to download data"
+              >
+                <Download size={13} />
+                <span>Download</span>
+              </button>
+            </div>
             <button 
               id="export-diary-btn"
               onClick={() => {
@@ -4395,9 +4329,9 @@ const App: React.FC = () => {
                 setExportTAYear(metadata.year ?? new Date().getFullYear());
                 setShowExportTAModal(true);
               }} 
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 sm:px-5 py-2.5 sm:py-3 rounded-xl font-bold shadow-xl transition-all active:scale-95 text-[11px] sm:text-sm cursor-pointer whitespace-nowrap"
             >
-              <FileText size={14} className="sm:w-[18px] sm:h-[18px]" /> 
+              <FileSpreadsheet size={14} className="sm:w-[18px] sm:h-[18px]" /> 
               <span>TA Calculations</span>
             </button>
             <button 
@@ -4412,6 +4346,9 @@ const App: React.FC = () => {
               <FileText size={14} className="sm:w-[18px] sm:h-[18px]" /> 
               <span>TA Bill</span>
             </button>
+
+            {/* PWA Install Button */}
+            <PWAInstallButton onOpenOfflineModal={() => setShowOfflinePackageModal(true)} />
           </div>
         </div>
       </header>
@@ -4499,8 +4436,8 @@ const App: React.FC = () => {
               <span className="block text-xs font-black uppercase tracking-wide">5. Live Travel Log</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
                 {showAllMonths 
-                  ? `${historicalMonthMovements.length} rows • ${historicalMonthKM.toFixed(0)} KM (${selectedHistoricalMonth})` 
-                  : `${currentFortnightMovements.length} rows • ${currentFortnightKM.toFixed(0)} KM`}
+                  ? `${historicalMonthMovements.length} rows • ${Number.isInteger(historicalMonthKM) ? historicalMonthKM : parseFloat(historicalMonthKM.toFixed(2))} KM (${selectedHistoricalMonth})` 
+                  : `${currentFortnightMovements.length} rows • ${Number.isInteger(currentFortnightKM) ? currentFortnightKM : parseFloat(currentFortnightKM.toFixed(2))} KM`}
               </span>
             </div>
           </button>
@@ -4514,9 +4451,9 @@ const App: React.FC = () => {
               <Settings2 size={18} />
             </div>
             <div className="min-w-0">
-              <span className="block text-xs font-black uppercase tracking-wide">6. Settings</span>
+              <span className="block text-xs font-black uppercase tracking-wide">6. Configuration</span>
               <span className="block text-[10px] opacity-80 truncate font-semibold">
-                Configure defaults & offices
+                Defaults, offices & delete data
               </span>
             </div>
           </button>
@@ -4582,6 +4519,24 @@ const App: React.FC = () => {
                     <span>Clear Profile Data</span>
                   </button>
 
+                  {/* Delete Previous Month Data button */}
+                  <button
+                    type="button"
+                    id="btn-goto-month-cleanup"
+                    onClick={() => {
+                      setActiveTab('database');
+                      setTimeout(() => {
+                        const el = document.getElementById('month-wise-data-management-section');
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }, 100);
+                    }}
+                    className="px-4 py-3 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 text-rose-600 rounded-2xl text-xs font-black uppercase tracking-wider border border-rose-200 transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Select and delete previous month entered data month-wise"
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete Month Data</span>
+                  </button>
+
                   {/* Delete Profile button */}
                   <button
                     type="button"
@@ -4604,11 +4559,6 @@ const App: React.FC = () => {
                           const nextProfile = finalProfiles[0];
                           switchProfile(nextProfile);
                           setConfirmModal(null);
-
-                          // Sync to Cloud immediately to overwrite
-                          setTimeout(() => {
-                            syncWorkspaceToWebStorage();
-                          }, 200);
                         }
                       });
                     }}
@@ -4897,106 +4847,107 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Cloud Storage & Transfer (PC ↔ Mobile) Section */}
-          <div className="bg-gradient-to-br from-sky-50 to-indigo-50/50 p-6 sm:p-8 rounded-[2rem] border border-sky-200/80 shadow-sm mt-6 animate-fade-in text-left" id="cloud-storage-transfer-section">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-sky-100 pb-4">
+          {/* Local Data Backup & Restore (JSON) Section */}
+          <div className="bg-gradient-to-br from-slate-50 to-blue-50/50 p-6 sm:p-8 rounded-[2rem] border border-slate-200 shadow-sm mt-6 animate-fade-in text-left" id="local-storage-backup-section">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
               <div className="space-y-1">
-                <span className="px-3 py-1 bg-sky-600 text-white rounded-xl font-black text-[10px] uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm">
-                  <Cloud size={12} /> Cloud Sync & Transfer
+                <span className="px-3 py-1 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-wider inline-flex items-center gap-1.5 shadow-sm">
+                  <Database size={12} /> Local Backup & Restore
                 </span>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight mt-1">PC ↔ Mobile Data Transfer</h3>
+                <h3 className="text-xl font-black text-slate-800 tracking-tight mt-1">Export & Import Data File</h3>
                 <p className="text-slate-600 text-xs font-semibold max-w-2xl">
-                  Transfer your entire workspace (all profiles, diaries, transits, service calls, and custom database settings) between your PC and Mobile phone whenever you choose.
+                  Download a complete JSON backup of your workspace (all profiles, diaries, movements, service calls, and custom databases) or restore from a previously saved backup file.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-              {/* Option 1: Upload to Cloud */}
-              <div className="bg-white p-6 rounded-2xl border border-sky-200/70 shadow-sm flex flex-col justify-between space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+              {/* Option 0: 6-Digit PIN & QR Transfer (PC ⇄ Mobile) */}
+              <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-indigo-50 p-6 rounded-2xl border-2 border-emerald-300 shadow-md flex flex-col justify-between space-y-4 relative overflow-hidden">
+                <div className="absolute top-3 right-3">
+                  <span className="px-2.5 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm">
+                    PIN & QR
+                  </span>
+                </div>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sky-700 font-black text-sm uppercase tracking-wide">
-                    <Upload size={18} /> 1. Upload to Cloud
+                  <div className="flex items-center gap-2 text-emerald-800 font-black text-sm uppercase tracking-wide">
+                    <KeyRound size={18} className="text-emerald-600" />
+                    <span>6-Digit PIN Sync Hub</span>
                   </div>
-                  <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-                    Upload your current workspace data to get a temporary 6-digit PIN. Enter this PIN on your second device to download and restore your data.
+                  <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+                    Upload from mobile and download onto PC (or vice versa). Instant 6-digit PIN number, QR scanner, and cloud sync relay.
                   </p>
                 </div>
 
-                {activeCloudPin && (
-                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
-                    <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider block">Your 6-Digit Cloud PIN:</span>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-2xl font-black tracking-widest text-emerald-900 font-mono">
-                        {activeCloudPin.slice(0, 3)} {activeCloudPin.slice(3)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(activeCloudPin);
-                          setConfirmModal({
-                            title: "PIN Copied! 📋",
-                            message: `6-Digit PIN ${activeCloudPin.slice(0, 3)} ${activeCloudPin.slice(3)} copied to clipboard.`,
-                            confirmText: "OK",
-                            accentColor: "emerald",
-                            onConfirm: () => setConfirmModal(null)
-                          });
-                        }}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm active:scale-95 border-0"
-                      >
-                        <Copy size={13} />
-                        <span>Copy</span>
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-emerald-700 font-medium">
-                      ⏱️ Active for 48 hours. Enter this PIN on your target PC or Mobile device.
-                    </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinSyncInitialMode('upload');
+                      setShowPinSyncModal(true);
+                    }}
+                    className="py-3 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-1.5 border-0"
+                  >
+                    <Upload size={14} />
+                    <span>Upload (Get PIN)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinSyncInitialMode('download');
+                      setShowPinSyncModal(true);
+                    }}
+                    className="py-3 px-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-1.5 border-0"
+                  >
+                    <Download size={14} />
+                    <span>Download (PIN)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 1: Export Local JSON Backup */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-blue-700 font-black text-sm uppercase tracking-wide">
+                    <Download size={18} /> 1. Export Backup (JSON)
                   </div>
-                )}
+                  <p className="text-xs text-slate-500 font-semibold leading-relaxed">
+                    Download all your saved work diary entries, transit records, and office configurations directly as a JSON file to your device.
+                  </p>
+                </div>
 
                 <button
                   type="button"
-                  disabled={isUploading}
-                  onClick={handleCloudUpload}
-                  className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 border-0"
+                  onClick={exportAllDataAsJSON}
+                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 border-0"
                 >
-                  <Upload size={16} />
-                  <span>{isUploading ? "Uploading Data..." : "Upload Workspace & Get 6-Digit PIN"}</span>
+                  <Download size={16} />
+                  <span>Download Backup File</span>
                 </button>
               </div>
 
-              {/* Option 2: Download from Cloud */}
-              <div className="bg-white p-6 rounded-2xl border border-indigo-200/70 shadow-sm flex flex-col justify-between space-y-4">
+              {/* Option 2: Restore from Local JSON File */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-indigo-700 font-black text-sm uppercase tracking-wide">
-                    <CloudDownload size={18} /> 2. Download from Cloud
+                    <Upload size={18} /> 2. Restore Backup (JSON)
                   </div>
                   <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-                    Enter the 6-digit PIN generated from your PC or Mobile device to download and restore your data onto this device.
+                    Select a previously downloaded SA Diary backup JSON file from your device to restore your data.
                   </p>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Enter 6-Digit PIN:</label>
+                <label className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 text-center">
+                  <Upload size={16} />
+                  <span>Choose Backup File to Restore</span>
                   <input
-                    type="text"
-                    maxLength={7}
-                    placeholder="e.g. 123456"
-                    value={syncPinInput}
-                    onChange={(e) => setSyncPinInput(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-center text-lg font-black tracking-widest text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition-all"
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileUploadSync}
+                    className="hidden"
                   />
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isDownloading || !syncPinInput.trim()}
-                  onClick={() => handleCloudDownload()}
-                  className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 border-0"
-                >
-                  <CloudDownload size={16} />
-                  <span>{isDownloading ? "Downloading Data..." : "Download & Restore Workspace"}</span>
-                </button>
+                </label>
               </div>
             </div>
           </div>
@@ -5024,6 +4975,9 @@ const App: React.FC = () => {
           historicalMonthsList={historicalMonthsList}
           formatMMYYYY={formatMMYYYY}
           scrDefaults={scrDefaults}
+          currentVisits={visits}
+          currentEntryDate={availableDays[selectedDateIdx] ? formatDate(availableDays[selectedDateIdx]) : ''}
+          setConfirmedScrDays={setConfirmedScrDays}
         />
       )}
 
@@ -5368,7 +5322,7 @@ const App: React.FC = () => {
                      const dStr = formatDate(activeDay);
                      const matchingList = serviceCalls.filter(sc => normalizeDateStr(sc.date) === dStr);
                      const officesSorted = [...matchingList].sort((a, b) => timeToMinutes(a.timeIn) - timeToMinutes(b.timeIn));
-                     const officeNamesText = officesSorted.map(m => cleanOfficeSpelling(m.officeAttended)).join(' & ');
+                     const officeNamesText = officesSorted.map(m => `${cleanOfficeSpelling(m.officeAttended)} (${cleanHrsToTime(m.timeIn, '10:00')} - ${cleanHrsToTime(m.timeOut, '17:00')})`).join(' & ');
                      if (matchingList.length === 0) return null;
 
                      return (
@@ -5590,11 +5544,33 @@ const App: React.FC = () => {
                        <X size={16}/> Cancel
                     </button>
                     <button 
-                       id="save-entry-btn"
-                       onClick={handleSaveDay}
-                       className="flex-[2] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border-0"
+                       type="button"
+                       id="save-stay-btn"
+                       onClick={() => handleSaveDay(false)}
+                       className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border-0 ${
+                         saveSuccessFeedback 
+                           ? 'bg-emerald-600 text-white shadow-emerald-200' 
+                           : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200/50'
+                       }`}
+                       title="Save changes and stay on this date"
                     >
-                      <Save size={16}/> Save & Next Date
+                      {saveSuccessFeedback ? (
+                        <>
+                          <CheckCircle2 size={16} /> Saved!
+                        </>
+                      ) : (
+                        <>
+                          <Save size={16}/> Save Day
+                        </>
+                      )}
+                    </button>
+                    <button 
+                       id="save-entry-btn"
+                       onClick={() => handleSaveDay(true)}
+                       className="flex-[1.5] py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer border-0"
+                       title="Save changes and advance to next date"
+                    >
+                      <Save size={16}/> Save & Next Date ➔
                     </button>
                  </div>
               </div>
@@ -5911,9 +5887,9 @@ const App: React.FC = () => {
           <section className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden animate-fade-in" id="database-tab-content">
             <div className="p-8 border-b bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-left">
               <div>
-                <h2 className="text-xl font-black text-slate-800">Application & Database Settings</h2>
+                <h2 className="text-xl font-black text-slate-800">Application Configuration & Database Settings</h2>
                 <p className="text-xs text-slate-400 mt-1 font-semibold">
-                  Manage your defaulted items, attached (home) office, and custom office matrix database.
+                  Manage defaults, attached (home) office, month-wise entered data cleanup, and office matrix database.
                 </p>
               </div>
               <button
@@ -6066,1023 +6042,39 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Database Quick Setup Actions */}
-            <div className="p-8 border-b border-slate-100 bg-slate-50/20">
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight text-left">Quick Database Actions</h3>
-                  <p className="text-xs text-slate-500 mt-1 text-left">
-                    Wipe database records of active profile to start on a clean slate.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setOfficesDb([]);
-                    }}
-                    className="px-4 py-3 border border-dashed border-rose-200 hover:bg-rose-50 text-rose-600 font-extrabold rounded-xl text-xs transition-all active:scale-95 cursor-pointer"
-                  >
-                    Clear Database
-                  </button>
-                </div>
-              </div>
-            </div>
+            {/* Month-wise Entered Data Management & Deletion */}
+            <MonthWiseDataManagement
+              activities={activities}
+              setActivities={setActivities}
+              movements={movements}
+              setMovements={setMovements}
+              serviceCalls={serviceCalls}
+              setServiceCalls={setServiceCalls}
+              confirmedScrDays={confirmedScrDays}
+              setConfirmedScrDays={setConfirmedScrDays}
+              activeProfile={activeProfile}
+              currentMonth={metadata.month}
+              currentYear={metadata.year}
+              getProfileStorageKey={getProfileStorageKey}
+              setConfirmModal={setConfirmModal}
+              onMonthDeleted={(deletedMY) => {
+                if (selectedHistoricalMonth === deletedMY) {
+                  setSelectedHistoricalMonth('');
+                }
+              }}
+            />
 
-            {officesDb.length === 0 && (
-              <div className="mx-8 mt-8 p-8 bg-blue-50/30 rounded-3xl border-2 border-dashed border-blue-200/60 flex flex-col items-center text-center">
-                <div className="p-4 bg-blue-600/10 rounded-2xl text-blue-600 mb-4 animate-bounce">
-                  <Database size={28} />
-                </div>
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Your Office Matrix is Empty</h3>
-                <p className="text-xs text-slate-500 max-w-md mt-1.5 leading-relaxed">
-                  You are using a new profile or have cleared the database. Use the forms below to start adding custom offices and route configurations, or import them.
-                </p>
-              </div>
-            )}
-
-
-
-            {/* Database Import & Export Integration Panel */}
-            <div className="p-8 border-b border-slate-100 bg-slate-50/20">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                
-                {/* Left Side: Export & Proforma */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-100/85 shadow-md hover:shadow-lg transition-all flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="bg-blue-50 p-2.5 rounded-2xl text-blue-600">
-                        <FileSpreadsheet size={20} />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">1. Export & Sample Templates</h3>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider text-left">Excel & System-Wide Backups</p>
-                      </div>
-                    </div>
-                    
-                    <p className="text-xs text-slate-500 leading-relaxed mt-3 text-left">
-                      Export your active route directory so you don't lose custom additions when wiping data. You can also download the custom CSV/Excel proforma sheet to update large lists offline and import them effortlessly.
-                    </p>
-                  </div>
-
-                  <div className="mt-6 flex flex-wrap gap-2.5">
-                    <button
-                      onClick={downloadSampleProforma}
-                      className="flex-1 min-w-[170px] inline-flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-sm"
-                    >
-                      <Download size={14} />
-                      Download Proforma (Excel)
-                    </button>
-                    <button
-                      onClick={exportDatabaseAsCSV}
-                      className="flex-1 min-w-[130px] inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-sm"
-                    >
-                      <Download size={14} />
-                      Export CSV
-                    </button>
-                    <button
-                      onClick={exportDatabaseAsJSON}
-                      className="flex-1 min-w-[130px] inline-flex items-center justify-center gap-2 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black text-[10px] uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer shadow-sm"
-                    >
-                      <Download size={14} />
-                      Download JSON Backup
-                    </button>
-                  </div>
-                </div>
-
-                {/* Right Side: Import & Upload */}
-                <div className="bg-white p-6 rounded-3xl border border-slate-100/85 shadow-md hover:shadow-lg transition-all flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className="bg-emerald-50 p-2.5 rounded-2xl text-emerald-600">
-                        <Upload size={20} />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">2. Import & Restore Data</h3>
-                        <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-wider text-left">Dynamic CSV / JSON File Loader</p>
-                      </div>
-                    </div>
-                    
-                    <p className="text-xs text-slate-500 leading-relaxed mt-3 text-left">
-                      Select or drop a saved <strong>Office Database CSV/JSON backup</strong> file matching our required columns header format.
-                    </p>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    {/* File selection block */}
-                    {parsedEntries.length === 0 ? (
-                      <div>
-                        <input
-                          type="file"
-                          accept=".csv,.json"
-                          id="db-file-upload-input"
-                          className="hidden"
-                          onChange={handleFileUpload}
-                        />
-                        <label
-                          htmlFor="db-file-upload-input"
-                          className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-emerald-300 rounded-2xl p-5 hover:bg-slate-50/50 transition-all cursor-pointer group text-center"
-                        >
-                          <Upload className="text-slate-400 group-hover:text-emerald-500 transition-colors mb-2" size={24} />
-                          <span className="text-[11px] font-black uppercase text-slate-600 tracking-wider group-hover:text-emerald-600 transition-colors">
-                            Select CSV/JSON Database Configuration File
-                          </span>
-                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">
-                            Excel (Save as CSV file), config.json, or backup.csv
-                          </span>
-                        </label>
-                      </div>
-                    ) : (
-                      <div className="bg-emerald-50/40 border border-emerald-100 rounded-2xl p-4 animate-fade-in space-y-3 text-left">
-                        <div className="flex items-center justify-between">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase rounded-full">
-                            <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full animate-ping"></span>
-                            Loaded: {parsedEntries.length} Offices
-                          </span>
-                          <button
-                            onClick={() => setParsedEntries([])}
-                            className="text-xs text-slate-400 hover:text-slate-600 font-bold underline"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-
-                        {/* Direct First 3 preview table */}
-                        <div className="border border-emerald-100 rounded-xl bg-white/70 overflow-hidden text-[10px] font-semibold text-slate-600">
-                          <div className="grid grid-cols-5 p-2 bg-emerald-50 text-[8px] font-black uppercase tracking-widest text-emerald-700 border-b border-emerald-100 text-center">
-                            <div className="text-left col-span-2">Route Pair</div>
-                            <div>Bus Dist</div>
-                            <div>Bike Dist</div>
-                            <div>Bus/Bike Mins</div>
-                          </div>
-                          {parsedEntries.slice(0, 3).map((pe, idx) => (
-                            <div key={idx} className="grid grid-cols-5 p-2 border-b border-emerald-50/50 text-center last:border-0">
-                              <div className="text-left font-bold truncate col-span-2 text-slate-800">
-                                {pe.fromOffice} → {pe.toOffice}
-                              </div>
-                              <div>{pe.distanceBus} km</div>
-                              <div>{pe.distanceBike} km</div>
-                              <div>{pe.durationBus}/{pe.durationBike}m</div>
-                            </div>
-                          ))}
-                          {parsedEntries.length > 3 && (
-                            <div className="p-1 px-2 text-center text-[9px] text-slate-400 border-t border-emerald-50 font-bold italic">
-                              ...and {parsedEntries.length - 3} more records
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Import mode options */}
-                        <div className="flex items-center justify-around gap-2 bg-white/50 p-2 rounded-xl border border-emerald-100/50 text-xs">
-                          <label className="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="importMode"
-                              checked={importMode === 'merge'}
-                              onChange={() => setImportMode('merge')}
-                              className="accent-emerald-600 text-emerald-600"
-                            />
-                            <span>Merge & Update</span>
-                          </label>
-                          <label className="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
-                            <input
-                              type="radio"
-                              name="importMode"
-                              checked={importMode === 'overwrite'}
-                              onChange={() => setImportMode('overwrite')}
-                              className="accent-rose-600 text-rose-500"
-                            />
-                            <span>Overwrite Directory</span>
-                          </label>
-                        </div>
-
-                        {/* Execute Action */}
-                        <button
-                          onClick={handleExecuteImport}
-                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest py-3.5 transition-all shadow-md active:scale-95 cursor-pointer"
-                        >
-                          Execute Import ({importMode === 'merge' ? 'Merge Database' : 'Full Overwrite'})
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Toast Alert Responses inside loader widgets */}
-                    {importError && (
-                      <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 text-xs text-rose-700 font-bold flex items-start justify-between gap-2.5 animate-fade-in text-left">
-                        <div className="flex items-start gap-2.5">
-                          <AlertCircle className="shrink-0 text-rose-500 mt-0.5" size={16} />
-                          <span>{importError}</span>
-                        </div>
-                        <button
-                          onClick={() => setImportError('')}
-                          className="text-rose-400 hover:text-rose-600 transition-colors bg-transparent border-0 cursor-pointer p-0.5"
-                          title="Close panel"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
-
-                    {importSuccess && (
-                      <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-xs text-emerald-800 font-bold flex items-start justify-between gap-2.5 animate-fade-in text-left">
-                        <div className="flex items-start gap-2.5">
-                          <CheckCircle2 className="shrink-0 text-emerald-500 mt-0.5" size={16} />
-                          <span>{importSuccess}</span>
-                        </div>
-                        <button
-                          onClick={() => setImportSuccess('')}
-                          className="text-emerald-400 hover:text-emerald-600 transition-colors bg-transparent border-0 cursor-pointer p-0.5"
-                          title="Close panel"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Form to Add New Office */}
-            <div className="p-8 bg-blue-50/30 border-b border-slate-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Add Dynamic Office Input</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider text-left">Configure custom route relationships and intermediate bus stand transit</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                {/* Row 1: Direct Office Route Metrics */}
-                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">From Office</label>
-                    <input
-                      type="text"
-                      list="db-from-office-options"
-                      placeholder="e.g. Kurinjipadi SO"
-                      value={newOfficeFromOffice}
-                      onChange={e => { setNewOfficeFromOffice(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                    <datalist id="db-from-office-options">
-                      {uniqueOfficesList.map(name => <option key={name} value={name} />)}
-                    </datalist>
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">To Office</label>
-                    <input
-                      type="text"
-                      list="db-to-office-options"
-                      placeholder="e.g. Vadalur SO"
-                      value={newOfficeToOffice}
-                      onChange={e => { setNewOfficeToOffice(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                    <datalist id="db-to-office-options">
-                      {uniqueOfficesList.map(name => <option key={name} value={name} />)}
-                    </datalist>
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bus Distance (KM)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="e.g. 15"
-                      value={newOfficeDistBus}
-                      onChange={e => { setNewOfficeDistBus(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>Bus Fare (Rs.)</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 15"
-                      value={newOfficeFareBus}
-                      onChange={e => { setNewOfficeFareBus(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-amber-50/20 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bike Distance (KM)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="e.g. 15"
-                      value={newOfficeDistBike}
-                      onChange={e => { setNewOfficeDistBike(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bus Duration (Mins)</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 30"
-                      value={newOfficeDurBus}
-                      onChange={e => { setNewOfficeDurBus(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5">Bike Duration (Mins)</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 20"
-                      value={newOfficeDurBike}
-                      onChange={e => { setNewOfficeDurBike(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Row 2: Bus Stand Transit Details (The "Via" parameters) */}
-                <div className="grid grid-cols-1 md:grid-cols-8 gap-4 items-end bg-slate-50/50 p-4 rounded-2xl border border-slate-100/80">
-                  <div className="space-y-1 text-left md:col-span-2">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>Via Bus Stand</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      list="db-bus-stands"
-                      placeholder="e.g. CUDDALORE BUS STAND"
-                      value={newOfficeViaBusStand}
-                      onChange={e => { setNewOfficeViaBusStand(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                    <datalist id="db-bus-stands">
-                      <option value="CUDDALORE BUS STAND" />
-                      <option value="PANRUTI BUS STAND" />
-                      <option value="CHIDAMBARAM BUS STAND" />
-                      <option value="VADALUR BUS STAND" />
-                    </datalist>
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>From Office to BS (KM)</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="e.g. 35"
-                      value={newOfficeFromBsKm}
-                      onChange={e => { setNewOfficeFromBsKm(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>(From office to BS) Fare</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 10"
-                      value={newOfficeFromBsFare}
-                      onChange={e => { setNewOfficeFromBsFare(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-amber-50/20 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>From Office to BS (Mins)</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 60"
-                      value={newOfficeFromBsMins}
-                      onChange={e => { setNewOfficeFromBsMins(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>BS to To Office (KM)</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="e.g. 5"
-                      value={newOfficeToBsKm}
-                      onChange={e => { setNewOfficeToBsKm(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>(BS to To office ) Fare</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 10"
-                      value={newOfficeToBsFare}
-                      onChange={e => { setNewOfficeToBsFare(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-amber-50/20 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 text-left">
-                    <label className="inline-block bg-slate-100/80 border border-slate-200/50 text-slate-500 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest mb-1.5 flex items-center gap-1">
-                      <span>BS to To Office (Mins)</span>
-                      <span className="text-[8px] text-slate-400 font-bold lowercase">(opt)</span>
-                    </label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 15"
-                      value={newOfficeToBsMins}
-                      onChange={e => { setNewOfficeToBsMins(e.target.value); setDbError(''); }}
-                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-300 transition-all shadow-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={() => {
-                      if (!newOfficeFromOffice.trim()) {
-                        setDbError('Please enter standard or custom From Office');
-                        return;
-                      }
-                      if (!newOfficeToOffice.trim()) {
-                        setDbError('Please enter standard or custom To Office');
-                        return;
-                      }
-                      const normalizedFrom = newOfficeFromOffice.toLowerCase().replace(/\s+/g, '').trim();
-                      const normalizedTo = newOfficeToOffice.toLowerCase().replace(/\s+/g, '').trim();
-                      if (officesDb.some(o => {
-                        const itemFrom = o.fromOffice.toLowerCase().replace(/\s+/g, '').trim();
-                        const itemTo = o.toOffice.toLowerCase().replace(/\s+/g, '').trim();
-                        return (itemFrom === normalizedFrom && itemTo === normalizedTo) || (itemFrom === normalizedTo && itemTo === normalizedFrom);
-                      })) {
-                        setDbError('A route relationship between these two offices already exists');
-                        return;
-                      }
-
-                      const valDistBus = parseFloat(newOfficeDistBus) || 0;
-                      const valDistBike = parseFloat(newOfficeDistBike) || 0;
-                      const valDurBus = parseInt(newOfficeDurBus) || 0;
-                      const valDurBike = parseInt(newOfficeDurBike) || 0;
-
-                      const valViaBusStand = newOfficeViaBusStand.trim();
-                      const valFromBsKm = parseFloat(newOfficeFromBsKm);
-                      const valFromBsMins = parseInt(newOfficeFromBsMins);
-                      const valToBsKm = parseFloat(newOfficeToBsKm);
-                      const valToBsMins = parseInt(newOfficeToBsMins);
-
-                      const valFareBus = parseFloat(newOfficeFareBus);
-                      const valFromBsFare = parseFloat(newOfficeFromBsFare);
-                      const valToBsFare = parseFloat(newOfficeToBsFare);
-
-                      const newEntry: OfficeDatabaseEntry = {
-                        fromOffice: newOfficeFromOffice.trim(),
-                        toOffice: newOfficeToOffice.trim(),
-                        distanceBus: valDistBus,
-                        distanceBike: valDistBike,
-                        durationBus: valDurBus,
-                        durationBike: valDurBike,
-                        viaBusStand: valViaBusStand || undefined,
-                        fromOfficeToBsKm: isNaN(valFromBsKm) ? undefined : valFromBsKm,
-                        fromOfficeToBsMins: isNaN(valFromBsMins) ? undefined : valFromBsMins,
-                        toOfficeToBsKm: isNaN(valToBsKm) ? undefined : valToBsKm,
-                        toOfficeToBsMins: isNaN(valToBsMins) ? undefined : valToBsMins,
-                        fareBus: isNaN(valFareBus) ? undefined : valFareBus,
-                        fromOfficeToBsFare: isNaN(valFromBsFare) ? undefined : valFromBsFare,
-                        toOfficeToBsFare: isNaN(valToBsFare) ? undefined : valToBsFare
-                      };
-
-                      setOfficesDb(prev => [...prev, newEntry].sort((a,b) => a.fromOffice.localeCompare(b.fromOffice) || a.toOffice.localeCompare(b.toOffice)));
-                      
-                      // Reset fields
-                      setNewOfficeFromOffice('');
-                      setNewOfficeToOffice('');
-                      setNewOfficeDistBus('');
-                      setNewOfficeDistBike('');
-                      setNewOfficeDurBus('');
-                      setNewOfficeDurBike('');
-                      setNewOfficeViaBusStand('');
-                      setNewOfficeFromBsKm('');
-                      setNewOfficeFromBsMins('');
-                      setNewOfficeToBsKm('');
-                      setNewOfficeToBsMins('');
-                      setNewOfficeFareBus('');
-                      setNewOfficeFromBsFare('');
-                      setNewOfficeToBsFare('');
-                      setDbError('');
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center px-6 py-3.5 transition-all shadow-md active:scale-95 cursor-pointer h-[46px]"
-                  >
-                    Add Office
-                  </button>
-                </div>
-              </div>
-
-              {dbError && (
-                <div className="mt-3 text-xs text-rose-600 font-bold flex items-center justify-between gap-1.5 animate-fade-in text-left bg-rose-50 border border-rose-100 rounded-xl p-3">
-                  <div className="flex items-center gap-1.5">
-                    <AlertCircle size={14} className="shrink-0 text-rose-500" />
-                    <span>{dbError}</span>
-                  </div>
-                  <button
-                    onClick={() => setDbError('')}
-                    className="text-rose-400 hover:text-rose-600 transition-colors bg-transparent border-0 cursor-pointer p-0.5"
-                    title="Close warning"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Database Search/Filter Panel */}
-            <div id="office-database-filter-panel" className="mx-8 mb-6 p-5 bg-slate-50 border border-slate-200/60 rounded-3xl text-left">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <div className="bg-indigo-50 p-2 rounded-xl text-indigo-600">
-                    <Filter size={16} />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">Filter Office Matrix</h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Locate specific routes quickly</p>
-                  </div>
-                </div>
-                
-                <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl w-full">
-                  <div className="relative">
-                    <select
-                      value={filterFromOffice}
-                      onChange={e => setFilterFromOffice(e.target.value)}
-                      className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 transition-all shadow-sm appearance-none cursor-pointer"
-                    >
-                      <option value="">All From Offices</option>
-                      {uniqueFromOffices.map(o => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                    {filterFromOffice && (
-                      <button
-                        onClick={() => setFilterFromOffice('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 border-0 bg-transparent cursor-pointer p-0.5"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="relative">
-                    <select
-                      value={filterToOffice}
-                      onChange={e => setFilterToOffice(e.target.value)}
-                      className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400/20 transition-all shadow-sm appearance-none cursor-pointer"
-                    >
-                      <option value="">All To Offices</option>
-                      {uniqueToOffices.map(o => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                    {filterToOffice && (
-                      <button
-                        onClick={() => setFilterToOffice('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 border-0 bg-transparent cursor-pointer p-0.5"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {(filterFromOffice || filterToOffice) && (
-                  <button
-                    onClick={() => {
-                      setFilterFromOffice('');
-                      setFilterToOffice('');
-                    }}
-                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 text-slate-600 font-extrabold rounded-xl text-xs transition-all active:scale-95 cursor-pointer bg-white"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* List of offices editable inline */}
-            <div className="hidden lg:block overflow-x-auto overflow-y-auto max-h-[600px] custom-scrollbar">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="text-[10px] bg-slate-50 border-b font-black text-slate-400 uppercase tracking-widest sticky top-0 z-10 text-center">
-                    <th className="px-6 py-4 text-left w-[15%]">From Office</th>
-                    <th className="px-6 py-4 text-left w-[15%]">To Office</th>
-                    <th className="px-2 py-4">Bus Distance (KM)</th>
-                    <th className="px-2 py-4 text-amber-600">Bus Fare (Rs.)</th>
-                    <th className="px-2 py-4">Bike Distance (KM)</th>
-                    <th className="px-2 py-4">Bus Duration (Mins)</th>
-                    <th className="px-2 py-4">Bike Duration (Mins)</th>
-                    <th className="px-2 py-4">Via Bus Stand</th>
-                    <th className="px-2 py-4 text-[9px]">From Office to BS (KM)</th>
-                    <th className="px-2 py-4 text-[9px] text-amber-600">(From office to BS) Fare</th>
-                    <th className="px-2 py-4 text-[9px]">From Office to BS (Mins)</th>
-                    <th className="px-2 py-4 text-[9px]">BS to To Office (KM)</th>
-                    <th className="px-2 py-4 text-[9px] text-amber-600">(BS to To office ) Fare</th>
-                    <th className="px-2 py-4 text-[9px]">BS to To Office (Mins)</th>
-                    <th className="px-2 py-4">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredOffices.map(({ o, originalIdx: idx }) => {
-                    const rowKey = `${o.fromOffice}-${o.toOffice}-${idx}`;
-                    return (
-                      <tr key={rowKey} className="hover:bg-slate-50/50 transition-all">
-                        <td className="px-6 py-3 font-semibold text-xs text-slate-700 text-left">
-                          {o.fromOffice}
-                        </td>
-                        <td className="px-6 py-3 font-semibold text-xs text-slate-700 text-left">
-                          {o.toOffice}
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={o.distanceBus}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, distanceBus: parseFloat(e.target.value) || 0} : item))}
-                            className="w-16 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            placeholder="auto"
-                            value={o.fareBus !== undefined ? o.fareBus : ''}
-                            onChange={e => {
-                               const val = parseFloat(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fareBus: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-16 bg-amber-50/10 border border-amber-200 rounded-lg py-2 text-center text-xs font-black text-amber-800 focus:bg-white focus:border-amber-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={o.distanceBike}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, distanceBike: parseFloat(e.target.value) || 0} : item))}
-                            className="w-16 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            value={o.durationBus}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, durationBus: parseInt(e.target.value) || 0} : item))}
-                            className="w-16 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            value={o.durationBike}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, durationBike: parseInt(e.target.value) || 0} : item))}
-                            className="w-16 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="text"
-                            placeholder="None"
-                            value={o.viaBusStand || ''}
-                            onChange={e => {
-                               const val = e.target.value;
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, viaBusStand: val.trim() || undefined} : item));
-                            }}
-                            className="w-28 bg-slate-50 border border-slate-200 rounded-lg py-2 px-1 text-center text-xs font-bold text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            step="0.1"
-                            placeholder="0"
-                            value={o.fromOfficeToBsKm !== undefined ? o.fromOfficeToBsKm : ''}
-                            onChange={e => {
-                               const val = parseFloat(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsKm: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            placeholder="auto"
-                            value={o.fromOfficeToBsFare !== undefined ? o.fromOfficeToBsFare : ''}
-                            onChange={e => {
-                               const val = parseFloat(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsFare: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-amber-50/10 border border-amber-200 rounded-lg py-2 text-center text-xs font-black text-amber-800 focus:bg-white focus:border-amber-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            placeholder="0"
-                            value={o.fromOfficeToBsMins !== undefined ? o.fromOfficeToBsMins : ''}
-                            onChange={e => {
-                               const val = parseInt(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsMins: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            step="0.1"
-                            placeholder="0"
-                            value={o.toOfficeToBsKm !== undefined ? o.toOfficeToBsKm : ''}
-                            onChange={e => {
-                               const val = parseFloat(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsKm: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            placeholder="auto"
-                            value={o.toOfficeToBsFare !== undefined ? o.toOfficeToBsFare : ''}
-                            onChange={e => {
-                               const val = parseFloat(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsFare: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-amber-50/10 border border-amber-200 rounded-lg py-2 text-center text-xs font-black text-amber-800 focus:bg-white focus:border-amber-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
-                          <input
-                            type="number"
-                            placeholder="0"
-                            value={o.toOfficeToBsMins !== undefined ? o.toOfficeToBsMins : ''}
-                            onChange={e => {
-                               const val = parseInt(e.target.value);
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsMins: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-14 bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white focus:border-blue-300 outline-none transition-all"
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          <button
-                            onClick={() => setOfficesDb(prev => prev.filter((_, i) => i !== idx))}
-                            className="text-slate-300 hover:text-rose-600 transition-colors p-2 rounded-xl hover:bg-rose-50 border-0 bg-transparent cursor-pointer"
-                            title="Delete office"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {officesDb.length === 0 ? (
-                    <tr>
-                      <td colSpan={15} className="px-6 py-12 text-center text-slate-400 font-bold text-xs uppercase animate-pulse">
-                        No customized offices database records found. Use the editor panel above to append one.
-                      </td>
-                    </tr>
-                  ) : filteredOffices.length === 0 ? (
-                    <tr>
-                      <td colSpan={15} className="px-6 py-12 text-center text-slate-400 font-bold text-xs uppercase">
-                        No customized offices match your filters.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile View: Render as Cards instead of sideways scrolling table */}
-            <div className="block lg:hidden space-y-4 max-h-[600px] overflow-y-auto p-4 bg-slate-50 border-t border-slate-100">
-              {officesDb.length === 0 ? (
-                <div className="py-10 text-center text-slate-400 text-xs font-black uppercase">
-                  No customized offices saved yet
-                </div>
-              ) : filteredOffices.length === 0 ? (
-                <div className="py-10 text-center text-slate-400 text-xs font-black uppercase">
-                  No customized offices match your filters
-                </div>
-              ) : (
-                filteredOffices.map(({ o, originalIdx: idx }) => {
-                  const cardKey = `card-${o.fromOffice}-${o.toOffice}-${idx}`;
-                  return (
-                    <div key={cardKey} className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm text-left relative space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
-                          Office Record {idx + 1}
-                        </span>
-                        <button
-                          onClick={() => {
-                            setOfficesDb(prev => prev.filter((_, i) => i !== idx));
-                          }}
-                          className="p-1 px-2.5 text-xs text-rose-500 bg-rose-50 rounded-lg hover:bg-rose-500 hover:text-white transition-all font-black uppercase tracking-widest"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                        <div>
-                          <span className="block text-[9px] font-bold text-slate-400 uppercase">From Office</span>
-                          <span className="font-semibold text-slate-700">{o.fromOffice}</span>
-                        </div>
-                        <div>
-                          <span className="block text-[9px] font-bold text-slate-400 uppercase">To Office</span>
-                          <span className="font-semibold text-slate-700">{o.toOffice}</span>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-3">
-                        <div>
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Bus Dist (KM)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={o.distanceBus}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, distanceBus: parseFloat(e.target.value) || 0} : item))}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-bold text-amber-600 uppercase mb-1">Bus Fare</label>
-                          <input
-                            type="number"
-                            placeholder="auto"
-                            value={o.fareBus !== undefined ? o.fareBus : ''}
-                            onChange={e => {
-                              const val = parseFloat(e.target.value);
-                              setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fareBus: isNaN(val) ? undefined : val} : item));
-                            }}
-                            className="w-full bg-amber-50/10 border border-amber-200 rounded-lg py-2 text-center text-xs font-black text-amber-800 focus:bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Bike Dist (KM)</label>
-                          <input
-                            type="number"
-                            step="0.1"
-                            value={o.distanceBike}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, distanceBike: parseFloat(e.target.value) || 0} : item))}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Bus Dur (Mins)</label>
-                          <input
-                            type="number"
-                            value={o.durationBus}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, durationBus: parseInt(e.target.value) || 0} : item))}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Bike Dur (Mins)</label>
-                          <input
-                            type="number"
-                            value={o.durationBike}
-                            onChange={e => setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, durationBike: parseInt(e.target.value) || 0} : item))}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 text-center text-xs font-black text-slate-800 focus:bg-white"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="border-t border-slate-100 pt-3 space-y-2">
-                        <div>
-                          <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1">Via Bus Stand</label>
-                          <input
-                            type="text"
-                            placeholder="None"
-                            value={o.viaBusStand || ''}
-                            onChange={e => {
-                               const val = e.target.value;
-                               setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, viaBusStand: val.trim() || undefined} : item));
-                            }}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 px-3 text-xs font-semibold text-slate-800 focus:bg-white"
-                          />
-                        </div>
-
-                        {o.viaBusStand && (
-                          <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 mt-2">
-                            <div className="col-span-2 text-[9px] font-black text-slate-400 uppercase tracking-widest pb-1">Bus Stand Specifics:</div>
-                            
-                            <div>
-                              <label className="block text-[8px] font-bold text-slate-400 uppercase">From Office to BS (KM)</label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={o.fromOfficeToBsKm !== undefined ? o.fromOfficeToBsKm : ''}
-                                onChange={e => {
-                                  const val = parseFloat(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsKm: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[8px] font-bold text-amber-600 uppercase">(From office to BS) Fare</label>
-                              <input
-                                type="number"
-                                placeholder="auto"
-                                value={o.fromOfficeToBsFare !== undefined ? o.fromOfficeToBsFare : ''}
-                                onChange={e => {
-                                  const val = parseFloat(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsFare: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium text-amber-800"
-                              />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="block text-[8px] font-bold text-slate-400 uppercase">From Office to BS (Mins)</label>
-                              <input
-                                type="number"
-                                value={o.fromOfficeToBsMins !== undefined ? o.fromOfficeToBsMins : ''}
-                                onChange={e => {
-                                  const val = parseInt(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, fromOfficeToBsMins: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[8px] font-bold text-slate-400 uppercase">BS to To Office (KM)</label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                value={o.toOfficeToBsKm !== undefined ? o.toOfficeToBsKm : ''}
-                                onChange={e => {
-                                  const val = parseFloat(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsKm: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[8px] font-bold text-amber-600 uppercase">(BS to To office ) Fare</label>
-                              <input
-                                type="number"
-                                placeholder="auto"
-                                value={o.toOfficeToBsFare !== undefined ? o.toOfficeToBsFare : ''}
-                                onChange={e => {
-                                  const val = parseFloat(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsFare: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium text-amber-800"
-                              />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="block text-[8px] font-bold text-slate-400 uppercase">BS to To Office (Mins)</label>
-                              <input
-                                type="number"
-                                value={o.toOfficeToBsMins !== undefined ? o.toOfficeToBsMins : ''}
-                                onChange={e => {
-                                  const val = parseInt(e.target.value);
-                                  setOfficesDb(prev => prev.map((item, i) => i === idx ? {...item, toOfficeToBsMins: isNaN(val) ? undefined : val} : item));
-                                }}
-                                className="w-full bg-white border border-slate-200 rounded-md py-1 text-center text-xs font-medium"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Save / Update Button for Custom Offices Database */}
-            <div className="px-8 py-5 bg-slate-50 border-t border-slate-100 flex justify-start items-center gap-4">
-              <button
-                onClick={() => {
+            {/* Modular Office Matrix & Database Manager */}
+            <div className="p-8">
+              <DatabaseSettingsTab
+                officesDb={officesDb}
+                setOfficesDb={setOfficesDb}
+                activeProfile={activeProfile}
+                onSaveToLocalStorage={(updated) => {
                   const keyOfficesDb = getProfileStorageKey(activeProfile, "offices_db");
-                  localStorage.setItem(keyOfficesDb, JSON.stringify(officesDb));
-                  setImportSuccess('Dynamic Office Database successfully updated & saved!');
-                  setTimeout(() => setImportSuccess(''), 4500);
+                  localStorage.setItem(keyOfficesDb, JSON.stringify(updated));
                 }}
-                className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-md inline-flex items-center gap-2 uppercase tracking-wide"
-              >
-                <Save size={14} />
-                <span>Update Dynamic Office Database</span>
-              </button>
+              />
             </div>
           </section>
         )}
@@ -7354,13 +6346,9 @@ const App: React.FC = () => {
 
                         setShowClearConfirm(false);
 
-                        // Trigger sync and reload if needed
+                        // Trigger reload if needed
                         if (needsReload) {
-                          syncWorkspaceToWebStorage().then(() => {
-                            window.location.reload();
-                          }).catch(() => {
-                            window.location.reload();
-                          });
+                          window.location.reload();
                         }
                       };
 
@@ -7544,13 +6532,9 @@ const App: React.FC = () => {
 
                       setShowClearConfirm(false);
 
-                      // Trigger sync and reload if needed
+                      // Trigger reload if needed
                       if (needsReload) {
-                        syncWorkspaceToWebStorage().then(() => {
-                          window.location.reload();
-                        }).catch(() => {
-                          window.location.reload();
-                        });
+                        window.location.reload();
                       }
                     }}
                     className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 text-white font-black text-sm rounded-xl transition-all shadow-lg hover:shadow-rose-100 text-center cursor-pointer"
@@ -7630,342 +6614,7 @@ const App: React.FC = () => {
          </div>
        )}
 
-      {showCloudSyncModal && (
-        <div id="cloud-sync-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowCloudSyncModal(false)}>
-          <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-2xl w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => setShowCloudSyncModal(false)}
-              className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer flex items-center justify-center"
-              title="Close Dialog"
-            >
-              <X size={20} />
-            </button>
-
-            <div className="flex items-center gap-4 text-left pr-8">
-              <div className="p-3.5 bg-sky-50 text-sky-600 rounded-2xl shrink-0">
-                <Cloud size={28} />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">☁️ Cloud Storage & Transfer</h3>
-                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-0.5">
-                  Transfer Workspace Between PC & Mobile Phone On Demand
-                </p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-600 font-semibold text-left leading-relaxed">
-              Upload your data on one device to generate a secure 6-digit PIN. Then enter that PIN on your other device to download and synchronize all your profile diaries, transits, service call reports, and custom office databases!
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
-              {/* Option 1: Upload */}
-              <div className="bg-slate-50 p-6 rounded-2xl border border-sky-100 flex flex-col justify-between space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sky-700 font-black text-sm uppercase tracking-wide">
-                    <Upload size={18} /> Upload to Cloud
-                  </div>
-                  <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-                    Generates a 6-digit PIN valid for 48 hours to transfer data from this device.
-                  </p>
-                </div>
-
-                {activeCloudPin && (
-                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
-                    <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider block">Your 6-Digit Sync PIN:</span>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xl font-black tracking-widest text-emerald-900 font-mono">
-                        {activeCloudPin.slice(0, 3)} {activeCloudPin.slice(3)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(activeCloudPin);
-                          setConfirmModal({
-                            title: "PIN Copied! 📋",
-                            message: `6-Digit PIN ${activeCloudPin.slice(0, 3)} ${activeCloudPin.slice(3)} copied to clipboard.`,
-                            confirmText: "OK",
-                            accentColor: "emerald",
-                            onConfirm: () => setConfirmModal(null)
-                          });
-                        }}
-                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm active:scale-95 border-0"
-                      >
-                        <Copy size={12} />
-                        <span>Copy</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  disabled={isUploading}
-                  onClick={handleCloudUpload}
-                  className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 border-0"
-                >
-                  <Upload size={15} />
-                  <span>{isUploading ? "Uploading..." : "Upload & Get PIN"}</span>
-                </button>
-              </div>
-
-              {/* Option 2: Download */}
-              <div className="bg-slate-50 p-6 rounded-2xl border border-indigo-100 flex flex-col justify-between space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-indigo-700 font-black text-sm uppercase tracking-wide">
-                    <CloudDownload size={18} /> Download from Cloud
-                  </div>
-                  <p className="text-xs text-slate-500 font-semibold leading-relaxed">
-                    Enter the 6-digit PIN from your computer or phone to download workspace.
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">Enter PIN:</label>
-                  <input
-                    type="text"
-                    maxLength={7}
-                    placeholder="e.g. 123456"
-                    value={syncPinInput}
-                    onChange={(e) => setSyncPinInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono text-center text-base font-black tracking-widest text-slate-800 outline-none focus:border-indigo-500 transition-all"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  disabled={isDownloading || !syncPinInput.trim()}
-                  onClick={() => handleCloudDownload()}
-                  className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 border-0"
-                >
-                  <CloudDownload size={15} />
-                  <span>{isDownloading ? "Downloading..." : "Download & Restore"}</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowCloudSyncModal(false)}
-                className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer border-0"
-              >
-                Close Window
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {optimizationResult && (
-        <div id="bike-optimizer-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setOptimizationResult(null)}>
-          <div className="bg-white rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-5 relative animate-fade-in" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => setOptimizationResult(null)}
-              className="absolute top-6 right-6 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer flex items-center justify-center"
-              title="Close Dialog"
-            >
-              <X size={18} />
-            </button>
-
-            <div className="flex items-center gap-4 text-left">
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
-                <Bike size={24} />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-slate-800 tracking-tight">🚴 Bike Mileage Optimizer</h3>
-                <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest mt-0.5">
-                  Target: 200 km limit optimizer {activeProfile === "Muthvel R" && "(Excl. Neyveli Cluster)"}
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl space-y-3 text-left">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-500">
-                  Proposed Total Bike KM {activeProfile === "Muthvel R" && "(Excl. Neyveli Cluster)"}:
-                </span>
-                <span className={`font-black text-sm ${optimizationResult.insufficient ? 'text-rose-600' : 'text-emerald-600'}`}>
-                  {optimizationResult.totalKM.toFixed(1)} km
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs border-t border-slate-200/50 pt-2">
-                <span className="font-semibold text-slate-500">Days set to BIKE mode:</span>
-                <span className="font-black text-slate-700">
-                  {optimizationResult.selectedIds.length} of {optimizationResult.candidates.length} days
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 font-medium leading-normal">
-                {optimizationResult.message}
-              </p>
-            </div>
-
-            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-              <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider text-left mb-1">Proposed Day-by-Day Configuration</p>
-              {optimizationResult.candidates.map((c: any) => {
-                const isBike = optimizationResult.selectedIds.includes(c.id);
-                return (
-                  <div key={c.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl hover:border-slate-200 transition-all text-xs">
-                    <div className="text-left">
-                      <span className="font-black text-slate-700">{c.date}</span>
-                      <span className="block text-[10px] text-slate-400 font-semibold truncate max-w-[240px]">
-                        {c.originalAct.visits.map((v: any) => v.officeName).join(' ➜ ')}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <span className="block text-[10px] font-black text-slate-500">
-                          {(c.isFixedBike || isBike) ? `${c.bikeKM.toFixed(1)} km` : `${c.busKM.toFixed(1)} km`}
-                        </span>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider ${
-                        c.isFixedBike
-                          ? 'bg-blue-50 text-blue-700 border border-blue-100'
-                          : isBike 
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
-                            : 'bg-slate-100 text-slate-500 border border-slate-200/50'
-                      }`}>
-                        {c.isFixedBike ? '🚴 BIKE (Fixed)' : isBike ? '🚴 BIKE' : '🚌 BUS'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-2 sm:gap-3 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setOptimizationResult(null)}
-                className="flex-1 py-3 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all border-0 cursor-pointer"
-              >
-                Cancel
-              </button>
-              {hasBikeOptBackup && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConfirmModal({
-                      title: "Restore Pre-Optimization State?",
-                      message: "This will revert all days in the current month back to their transport modes before bike optimization was applied.",
-                      confirmText: "Yes, Restore Previous State",
-                      accentColor: "amber",
-                      onConfirm: () => restorePreOptimizationState()
-                    });
-                  }}
-                  className="flex-1 py-3 px-3 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                  title="Revert transport modes to state before optimization"
-                >
-                  <RotateCcw size={13} />
-                  <span>Reset Pre-Opt</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => applyBikeOptimization(optimizationResult.selectedIds, optimizationResult.candidates)}
-                className="flex-1 py-3 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 border-0 cursor-pointer"
-              >
-                Apply Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {syncConflict && (
-        <div id="sync-conflict-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start gap-4 text-left">
-              <div className="p-3.5 bg-amber-50 text-amber-600 rounded-2xl shrink-0">
-                <AlertCircle size={28} />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-lg font-black text-slate-800 tracking-tight uppercase">
-                  Sync Conflict Detected! ⚠️
-                </h3>
-                <span className="inline-block bg-amber-50 text-amber-700 border border-amber-100 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest">
-                  Overwriting Blocked to Prevent Data Loss
-                </span>
-                <p className="text-slate-500 text-xs font-semibold leading-relaxed pt-2">
-                  Another device (<strong>{syncConflict.cloudDevice}</strong>) has uploaded newer diary entries to the cloud since this device was last synchronized.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 text-left space-y-3">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-500 font-bold">Cloud version timestamp:</span>
-                <span className="text-slate-800 font-extrabold font-mono">
-                  {new Date(syncConflict.cloudUpdatedAt).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-slate-500 font-bold">Cloud source device:</span>
-                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-black uppercase text-[8px] tracking-wider">
-                  {syncConflict.cloudDevice}
-                </span>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-400 font-semibold text-left">
-              To keep your diaries aligned across mobile and PC, please select the appropriate resolution action below:
-            </p>
-
-            <div className="flex flex-col gap-3">
-              <button
-                type="button"
-                onClick={() => resolveSyncConflictWithDownload(syncConflict.cloudPayload, syncConflict.cloudUpdatedAt)}
-                className="w-full text-left p-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 hover:border-emerald-300 rounded-2xl transition-all flex items-start gap-3 group cursor-pointer"
-              >
-                <div className="p-2 bg-emerald-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0">
-                  <Cloud size={16} />
-                </div>
-                <div>
-                  <span className="block text-xs font-black text-emerald-900 uppercase tracking-wide">
-                    📥 Pull Newer Cloud Work (Highly Recommended)
-                  </span>
-                  <span className="block text-[10px] text-emerald-700 font-semibold mt-0.5">
-                    Overwrite this device's local entries with the newer data from {syncConflict.cloudDevice}.
-                  </span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm("⚠️ WARNING: This will overwrite the newer cloud data permanently with this device's outdated/local state. Are you sure you want to proceed?")) {
-                    resolveSyncConflictWithForceOverwrite();
-                  }
-                }}
-                className="w-full text-left p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl transition-all flex items-start gap-3 group cursor-pointer"
-              >
-                <div className="p-2 bg-slate-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0">
-                  <Database size={16} />
-                </div>
-                <div>
-                  <span className="block text-xs font-black text-slate-800 uppercase tracking-wide">
-                    📤 Force Overwrite Cloud with Local Data
-                  </span>
-                  <span className="block text-[10px] text-slate-500 font-semibold mt-0.5">
-                    Discard the cloud's newer changes and keep this device's state as the primary version.
-                  </span>
-                </div>
-              </button>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setSyncConflict(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-0 cursor-pointer"
-              >
-                Decide Later / Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showTABillModal && (
+       {showTABillModal && (
         <div id="ta-bill-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowTABillModal(false)}>
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
             <button
@@ -8072,6 +6721,34 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {optimizationResult && (
+        <BikeOptimizerModal
+          isOpen={!!optimizationResult}
+          onClose={() => setOptimizationResult(null)}
+          candidates={optimizationResult.candidates}
+          initialSelectedIds={optimizationResult.initialSelectedIds}
+          recommendedUnderIds={optimizationResult.recommendedUnderIds}
+          recommendedOverIds={optimizationResult.recommendedOverIds}
+          baselineBusBikeKM={optimizationResult.baselineBusBikeKM}
+          nonCandidateBikeKM={optimizationResult.nonCandidateBikeKM}
+          targetKM={optimizationResult.targetKM}
+          monthName={optimizationResult.monthName}
+          year={optimizationResult.year}
+          activeProfile={optimizationResult.activeProfile}
+          onApply={applyBikeOptimization}
+          hasBackup={hasBikeOptBackup}
+          onRestoreBackup={() => {
+            setConfirmModal({
+              title: "Restore Pre-Optimization State?",
+              message: "This will revert all days in the current month back to their transport modes before bike optimization was applied.",
+              confirmText: "Yes, Restore Previous State",
+              accentColor: "amber",
+              onConfirm: () => restorePreOptimizationState()
+            });
+          }}
+        />
+      )}
+
       {showExportDiaryModal && (
         <div id="export-diary-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowExportDiaryModal(false)}>
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
@@ -8164,7 +6841,7 @@ const App: React.FC = () => {
 
       {showExportTAModal && (
         <div id="export-ta-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setShowExportTAModal(false)}>
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative" onClick={e => e.stopPropagation()}>
             <button
               onClick={() => setShowExportTAModal(false)}
               className="absolute top-5 right-5 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer"
@@ -8174,16 +6851,73 @@ const App: React.FC = () => {
             </button>
             
             <div className="flex items-center gap-4 text-left">
-              <div className="p-3 bg-violet-50 text-violet-600 rounded-2xl">
-                <FileText size={28} />
+              <div className={`p-3 rounded-2xl transition-colors ${exportTAFormat === 'excel' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                {exportTAFormat === 'excel' ? <FileSpreadsheet size={28} /> : <FileText size={28} />}
               </div>
               <div>
                 <h3 className="text-lg font-black text-slate-800 tracking-tight">Export TA Calculation</h3>
-                <p className="text-[10px] font-black uppercase tracking-widest text-violet-500 mt-0.5">TA Calculation Journal Sheet</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mt-0.5">
+                  Choose Format & Period ({exportTAFormat === 'excel' ? 'Excel .xlsx' : 'Word .docx'})
+                </p>
               </div>
             </div>
 
-            <div className="flex flex-col gap-4 text-left">
+            <div className="flex flex-col gap-5 text-left">
+              {/* Format Selection Option */}
+              <div>
+                <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">
+                  Select Format
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    id="ta-format-excel-btn"
+                    onClick={() => setExportTAFormat('excel')}
+                    className={`p-3.5 rounded-xl border-2 text-left flex flex-col gap-1.5 transition-all cursor-pointer ${
+                      exportTAFormat === 'excel'
+                        ? 'border-emerald-500 bg-emerald-50/60 shadow-sm ring-1 ring-emerald-500/20'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`flex items-center gap-1.5 font-black text-xs ${exportTAFormat === 'excel' ? 'text-emerald-700' : 'text-slate-700'}`}>
+                        <FileSpreadsheet size={16} className={exportTAFormat === 'excel' ? 'text-emerald-600' : 'text-slate-500'} /> Excel Sheet
+                      </span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${exportTAFormat === 'excel' ? 'bg-emerald-200 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                        .XLSX
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      Print-ready A4 portrait sheet with auto spacing & expandable rows
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="ta-format-word-btn"
+                    onClick={() => setExportTAFormat('word')}
+                    className={`p-3.5 rounded-xl border-2 text-left flex flex-col gap-1.5 transition-all cursor-pointer ${
+                      exportTAFormat === 'word'
+                        ? 'border-blue-500 bg-blue-50/60 shadow-sm ring-1 ring-blue-500/20'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`flex items-center gap-1.5 font-black text-xs ${exportTAFormat === 'word' ? 'text-blue-700' : 'text-slate-700'}`}>
+                        <FileText size={16} className={exportTAFormat === 'word' ? 'text-blue-600' : 'text-slate-500'} /> Word Doc
+                      </span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${exportTAFormat === 'word' ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                        .DOCX
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      Print-ready landscape document for Microsoft Word
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Month and Year Selection */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">
@@ -8192,7 +6926,7 @@ const App: React.FC = () => {
                   <select
                     value={exportTAMonth}
                     onChange={(e) => setExportTAMonth(parseInt(e.target.value, 10))}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all text-sm cursor-pointer"
                   >
                     {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, idx) => (
                       <option key={m} value={idx}>{m}</option>
@@ -8206,7 +6940,7 @@ const App: React.FC = () => {
                   <select
                     value={exportTAYear}
                     onChange={(e) => setExportTAYear(parseInt(e.target.value, 10))}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-violet-500 focus:bg-white transition-all text-sm"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all text-sm cursor-pointer"
                   >
                     {[2024, 2025, 2026, 2027].map(y => (
                       <option key={y} value={y}>{y}</option>
@@ -8219,145 +6953,26 @@ const App: React.FC = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowExportTAModal(false)}
-                className="flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0"
+                className="py-3 px-5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0"
               >
                 Cancel
               </button>
               <button
                 id="generate-ta-calc-btn"
                 onClick={() => {
-                  handleExportTA(exportTAMonth, exportTAYear);
+                  handleExportTA(exportTAMonth, exportTAYear, exportTAFormat);
                   setShowExportTAModal(false);
                 }}
-                className="flex-1 py-3 px-4 bg-violet-600 hover:bg-violet-700 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0 shadow-lg shadow-violet-100"
+                className={`flex-1 py-3 px-4 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer text-center border-0 shadow-lg flex items-center justify-center gap-2 ${
+                  exportTAFormat === 'excel'
+                    ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-100'
+                }`}
               >
-                Generate Document
+                {exportTAFormat === 'excel' ? <FileSpreadsheet size={16} /> : <FileText size={16} />}
+                <span>Download {exportTAFormat === 'excel' ? 'Excel Sheet (.xlsx)' : 'Word Document (.docx)'}</span>
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {loginModalOpen && (
-        <div id="web-sync-login-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in" onClick={() => setLoginModalOpen(false)}>
-          <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-6 relative animate-fade-in" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => setLoginModalOpen(false)}
-              className="absolute top-6 right-6 p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all border-0 bg-transparent cursor-pointer"
-              title="Close Dialog"
-            >
-              <X size={18} />
-            </button>
-            <div className="flex items-center gap-4 text-left">
-              <img 
-                src={logo} 
-                alt="SA's Diary Logo" 
-                className="w-14 h-14 object-contain rounded-2xl border border-slate-200 shadow-sm p-1 bg-white" 
-                referrerPolicy="no-referrer"
-              />
-              <div>
-                <h3 className="text-lg font-black text-slate-800 tracking-tight">Cloud Web Storage Space</h3>
-                <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest mt-0.5">Real-time Continuous Sync</p>
-              </div>
-            </div>
-
-            {webSyncUser ? (
-              // Connected Account Overview User Interface
-              <div className="space-y-4 text-left">
-                <div className="p-5 bg-slate-50 border border-slate-100 rounded-2xl space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200/50">
-                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Account ID</span>
-                    <span className="text-xs bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-lg font-black font-mono">{webSyncUser.email}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Storage Mode</span>
-                    <span className="text-xs text-emerald-600 font-extrabold flex items-center gap-1">🟢 Real-time Autosave Active</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">Sync Connection Status</span>
-                    <span className="text-xs text-slate-700 font-bold uppercase tracking-wide">
-                      {webSyncStatus === 'synced' && '✓ Synced & Backed Up'}
-                      {webSyncStatus === 'syncing' && '🔄 Saving updates to Cloud...'}
-                      {webSyncStatus === 'loading' && '🔄 Pulling cloud...'}
-                      {webSyncStatus === 'error' && `⚠️ Offline: ${webSyncErrorMessage}`}
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
-                  Excellent! Your diaries, 21 specialized Neyveli/Panruti offices, movements, and travel allowance databases are automatically saved to our server. Opening this web app on your smartphone, home PC, or tablet lets you resume instantly exactly where you left off.
-                </p>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      syncWorkspaceToWebStorage(undefined, getLocalStorageSyncPayload());
-                    }}
-                    disabled={webSyncStatus === 'syncing'}
-                    className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 font-black text-xs text-white rounded-xl transition-all cursor-pointer shadow-lg shadow-blue-100 border-0 active:scale-95 disabled:opacity-50"
-                  >
-                    {webSyncStatus === 'syncing' ? 'Syncing...' : 'Force Backup Now 🔄'}
-                  </button>
-                  <button
-                    onClick={handleWebSyncLogout}
-                    className="py-3 px-4 bg-red-50 hover:bg-red-100 hover:text-red-700 text-red-600 font-black text-xs rounded-xl transition-all cursor-pointer border border-red-100 active:scale-95"
-                  >
-                    Disconnect Sync
-                  </button>
-                </div>
-              </div>
-            ) : (
-              // Login or Registration User Interface
-              <form onSubmit={handleWebSyncSubmit} className="space-y-4 text-left">
-                <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
-                  Enter your email (e.g. <strong className="text-slate-800 font-extrabold">valavan89@gmail.com</strong>) and any passcode to establish your permanent Cloud Web Sync. Logging in with the same email and passcode on your mobile or home PC loads all records instantly!
-                </p>
-
-                {webSyncErrorMessage && (
-                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-700 font-bold leading-relaxed">
-                    ⚠️ {webSyncErrorMessage}
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Username or Email Address</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. valavan89@gmail.com"
-                      value={loginEmail}
-                      onChange={e => setLoginEmail(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200/80 focus:border-blue-300 focus:bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5">Passcode / PIN Password</label>
-                    <input
-                      required
-                      type="password"
-                      placeholder="Enter 4+ characters (memorize this)"
-                      value={loginPasscode}
-                      onChange={e => setLoginPasscode(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100/60 transition-all rounded-xl text-xs font-bold outline-none border border-slate-200/80 focus:border-blue-300 focus:bg-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 bg-blue-50/70 rounded-xl text-[10px] text-blue-800 font-bold leading-normal">
-                  💡 <strong>No registration required:</strong> If this email doesn&#39;t exist yet, typing a new passcode will immediately set up a secure cloud workspace partition for you.
-                </div>
-
-                 <button
-                  type="submit"
-                  disabled={webSyncStatus === 'loading'}
-                  className="w-full py-3.5 mt-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl transition-all shadow-xl shadow-blue-100 border-0 active:scale-95 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Cloud size={14} className={webSyncStatus === 'loading' ? 'animate-bounce' : ''} />
-                  {webSyncStatus === 'loading' ? 'Authenticating...' : 'Access Cloud Storage & Sync Device'}
-                </button>
-              </form>
-            )}
           </div>
         </div>
       )}
@@ -8603,6 +7218,45 @@ const App: React.FC = () => {
           </button>
         </div>
       )}
+
+
+      {/* 6-Digit PIN Cloud Sync Modal */}
+      <PinSyncModal
+        isOpen={showPinSyncModal}
+        onClose={() => setShowPinSyncModal(false)}
+        initialMode={pinSyncInitialMode}
+        metadata={metadata}
+        activeProfile={activeProfile}
+        onApplyData={handleApplyQRTransferData}
+      />
+
+      {/* Offline Package & Standalone App Modal */}
+      <OfflinePackageModal
+        isOpen={showOfflinePackageModal}
+        onClose={() => setShowOfflinePackageModal(false)}
+        onExportAllData={exportAllDataAsJSON}
+        onImportData={() => {
+          const input = document.getElementById('offline-restore-input') as HTMLInputElement;
+          if (input) input.click();
+        }}
+        operatingMode={operatingMode}
+        onSetOperatingMode={handleSetOperatingMode}
+      />
+
+      {/* Connectivity Banner when offline */}
+      <OfflineIndicator 
+        operatingMode={operatingMode}
+        onSwitchMode={handleSetOperatingMode}
+      />
+
+      {/* Hidden file input for offline backup restoration */}
+      <input
+        id="offline-restore-input"
+        type="file"
+        accept=".json"
+        onChange={handleFileUploadSync}
+        className="hidden"
+      />
 
     </div>
   );
